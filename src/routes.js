@@ -8,8 +8,10 @@
 import { isAbsolute } from 'node:path'
 import { inspectImport, runImport } from './restore/import.js'
 import { runExport } from './export.js'
+import { buildQueryReport } from './query.js'
 import { DEFAULT_OPTIONS, loadSettings, saveSettings } from './settings.js'
 import { degradationNotes } from './collect/index.js'
+import { openInFileManager } from './open.js'
 import { probeServices, service } from './services.js'
 import { ownVersion } from './collect/index.js'
 import { PLUGIN_ID } from './paths.js'
@@ -178,9 +180,10 @@ async function requireDirectory(path, { mustExist = true } = {}) {
 
 /**
  * 挂载路由。
+ * @param openDirectory 可注入：测试用假实现替掉"真的拉起文件管理器"
  * @returns disposer（把所有注册过的路由一起摘掉）
  */
-export function mountRoutes({ ctx, tasks, logger, env = process.env }) {
+export function mountRoutes({ ctx, tasks, logger, env = process.env, openDirectory = openInFileManager }) {
   const allowlist = new PickerAllowlist()
   const webServer = service(ctx, 'webServer')
   if (webServer === undefined || typeof webServer.register !== 'function') {
@@ -266,6 +269,30 @@ export function mountRoutes({ ctx, tasks, logger, env = process.env }) {
       return sendJson(response, 200, { path: null, via: 'host-picker' })
     }
     return sendError(response, 503, 'SERVICE_UNAVAILABLE', '宿主没有可用的目录选择器；可把路径登记一次（POST /pick {path}）', { pickerService: false })
+  }))
+
+  // ---- 配置查询（只读：生成可复制的安全文本，不写任何用户配置） ----
+  disposers.push(register('/query', async (request, response) => {
+    const body = await readJsonBody(request)
+    const sourceDir = typeof body.sourceDir === 'string' && body.sourceDir !== '' ? body.sourceDir : null
+    if (sourceDir === null || !allowlist.consume(sourceDir)) {
+      return sendError(response, 403, 'PICKER_NOT_ALLOWED', '查询来源必须来自目录选择器（白名单一次性有效）')
+    }
+    const report = await buildQueryReport({ sourceDir, env, detail: body.detail === true })
+    if (!report.ok) return sendError(response, 400, report.code, report.reason, { candidates: report.candidates, errors: report.errors })
+    sendJson(response, 200, report)
+  }))
+
+  // ---- 打开目录（体验优化项 1；只拉起系统文件管理器，不改任何文件） ----
+  disposers.push(register('/open', async (request, response) => {
+    const body = await readJsonBody(request)
+    const directory = await requireDirectory(body.path)
+    if (directory === null) return sendError(response, 400, 'PATH_UNSAFE', '要打开的路径必须是存在的绝对目录路径')
+    const opened = await openDirectory(directory, { logger })
+    if (opened?.ok !== true) {
+      return sendError(response, 503, opened?.code ?? 'OPEN_FAILED', opened?.reason ?? '打开目录失败')
+    }
+    sendJson(response, 200, { opened: true, path: opened.path ?? directory, via: opened.command ?? null })
   }))
 
   // ---- 导出 ----

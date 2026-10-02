@@ -60,14 +60,16 @@ async function setup() {
 
 const ORIGIN = { host: '127.0.0.1:19387', origin: 'http://127.0.0.1:19387' }
 
-test('路由：五个端点都按 exact 注册', async () => {
+test('路由：八个端点都按 exact 注册', async () => {
   const { routes } = await setup()
   assert.deepEqual(routes.map(route => route.path).sort(), [
     `${ROUTE_PREFIX}/cancel`,
     `${ROUTE_PREFIX}/export`,
     `${ROUTE_PREFIX}/import`,
     `${ROUTE_PREFIX}/inspect`,
+    `${ROUTE_PREFIX}/open`,
     `${ROUTE_PREFIX}/pick`,
+    `${ROUTE_PREFIX}/query`,
     `${ROUTE_PREFIX}/state`,
   ].sort())
   assert.equal(routes.every(route => route.kind === 'exact'), true)

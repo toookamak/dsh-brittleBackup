@@ -21,7 +21,7 @@
 | loader entry id | `brittle-backup`（UI 半用 `brittle-backup-ui`） | cordis 对重复 entry id 是整棵树起不来，必须独占前缀（实测 `duplicate loader entry id` 字符串存在于 dsh-market 的 7 个文件里） |
 | 设置命名空间 | **与 loader entry id 相同 = `brittle-backup`** | 实测 `settings` 服务的 `update` / `replace` / `mutate` 的 `ns` 参数语义就是 "Profile entry id"，`describe()` 也按 entry id 索引；**另起一个名字会指向不存在的条目**（原稿此处写 `dsh-brittle-backup`，与本表 entry id 自相矛盾，已纠正） |
 | 插件工作目录（快照 / temp） | `<DSH_HOME>\dsh-brittle-backup\` | 与 profile 目录同级的用户数据目录；**不是导出落点**（导出落点由用户自选，U31） |
-| 产物形态 | **一个目录**：`dsh-brittle-backup-<YYYYMMDD-HHmmss>\`，内含 `backup.json` + `兜底文档.md` +（勾选时）`skills\` | 阶段一为本地目录，无 zip、无体积硬上限（U30）；`latest.json` 与 skills zip 属阶段二 |
+| 产物形态 | 先生成 `dsh-brittle-backup-<YYYYMMDD-HHmmss>\`，默认交付同名 `.zip`；取消压缩则交付目录。内容为 `backup.json` + `兜底文档.md` +（勾选时）`skills\` | zip 是本地运输层封装，导入自动解压；`latest.json` 与独立 skills zip 属阶段二 |
 | 产物 `format` 字段 | `dsh-brittle-backup` | 与 `version` 共同构成对外契约 |
 | 凭据 ref 名 | **阶段二**：基础名 `DSH_BRITTLE_BACKUP_GITHUB_TOKEN` / `DSH_BRITTLE_BACKUP_WEBDAV_PASSWORD`，按目标派生（如 `…_WEBDAV_PASSWORD__<目标id>`） | 阶段一为本地模式，**不需要任何凭据**；保留本行以免将来重命名 |
 | 快照目录 | `<DSH_HOME>\dsh-brittle-backup\snapshots\` | 与 `.dsh-market\snapshots` 分开，互不干涉 |
@@ -44,7 +44,7 @@
 | 状态 | 条目 |
 |---|---|
 | **本期撤销 / 后置** | U6 界面双语、U7/U8 一键重启、U9 凭据录入、U12 多目标、U15 凭据按目标派生、U22 文档语言设置、U23 / D2 / D3 历史与保留（导出文件由用户自行管理）、U25 中"导出后台跑"的部分、U26–U29 远端历史与清理、`D1`（语言设置） |
-| **本期收窄** | U10 恢复入口 → **只从本地目录**（不再支持 WebDAV 下载与剪贴板粘贴）、U16 → **一份产物导出到用户自选目录**、U17 → skills 文件**以 `skills/` 子目录随导出目录一起走**（不再是 zip 附件） |
+| **本期收窄** | U10 恢复入口 → **只从本地目录或本地 zip**（不支持 WebDAV 下载与剪贴板粘贴）、U16 → **一份产物导出到用户自选目录**、U17 → skills 文件**以 `skills/` 子目录随导出目录一起走**（不再是独立 zip 附件；整体目录可封装为 zip） |
 | **本期新增** | **U30** 导出形态 = 一个**目录**（`backup.json` + `兜底文档.md` + `skills/`）；**U31** 导出落点 = **用户自选目录**，插件不维护导出历史；**U32** profile 配置读写**走官方 `settings` / `configEditor` 服务**（结构化，放弃"保留注释与行形式"）；**U33** 导入后仍用 `credentials.describe()` 查"本机缺哪个 key" |
 | **本期新增（第二次修订）** | **U34** 三处受限 `node:fs` 例外（快照目录 / 用户选定导出目录 / `<DSH_HOME>\skills`）；**U35** 导入可取消（取消 = 回滚）；**U36** 产物补 `enabled` 与 `producer.hostname`，`entries[]` 只收 override 非空条目，账号名不采集；**U37** 安装类写入（`package.json` / `pnpm-lock.yaml` / bundle 启停）由 `pluginManager` 独占。明细见 [SCOPE-PHASE1.md](SCOPE-PHASE1.md) §3 与本文 §17 |
 | **本期保留不变** | U1–U5（设置页 / 自包含可分享文档）、U11（skills 可勾选，落地为目录）、U13 场景、U14 环境差异对照、U18–U21（**含 §7 全 14 项兼容性验证**、合并写入、快照回滚、agent 忙碌拒绝）、U24（Agent 不可触发） |
@@ -343,7 +343,7 @@ C:\Users\Maxxie\.dsh\                     ← DSH_HOME（由 DSH_HOME 环境变�
 | profile 配置 | `cordis.patch.yml` **结构化条目**（只收录有 override 的 patch 目标条目）、`package.json`、`pnpm-workspace.yaml` 原文 | **放弃注释与行顺序**（U32）；密钥强制剥离；`package.json` **只读采集**，写入由 `pluginManager` 独占（U37） |
 | 插件清单 | name / spec / 实际版本 / 来源类型 / commit / **enabled** / 一句话用途 / `unportable` | 不搬运 `node_modules`；`enabled` 让"已装但被禁用"能被还原（U36） |
 | 模型配置 | provider（key、displayName、api、baseURL、apiKeyEnv）+ models[] + 默认模型 | 无任何密钥值 |
-| skills | 默认**仅名字 + 描述 + 路径**；用户可勾选"连文件一起" | 文件落地为导出目录下的 `skills\` **子目录**（逐字节，含子目录与二进制文件），不再是 zip（U17 收窄） |
+| skills | 默认**仅名字 + 描述 + 路径**；用户可勾选"连文件一起" | 文件落地为导出目录下的 `skills\` **子目录**（逐字节，含子目录与二进制文件），不再是独立 skills zip；整个导出目录默认可封装为 zip（U17 收窄） |
 | 兜底文档 | Markdown，含插件表、provider 表与可粘贴 YAML、模型表、skill 名、手工重建步骤 | 与 JSON 同源同版本；零主机名 / 零本机路径 |
 | 恢复 | 预览 diff、逐项勾选、兼容性闸门（§7 全 14 项）、环境差异对照、合并应用、缺 key 提示、**取消 = 回滚**、失败回滚 | 见 §6.2 / §7；入口只有本地目录（U10 收窄），新增 U35 |
 | 本地能力 | 导出到用户自选目录、从本地目录导入、导入前自动快照 | 保证离线可用；不维护导出历史（U31） |
@@ -802,7 +802,7 @@ credentials ──┘                                      │   └─ skills\�
 - skills 目录树往返：含子目录、空目录、二进制文件（如 png）逐字节一致。
 - 中途取消 / 注入失败（只读目录、agent 在跑、安装失败）→ 断言回滚与报告；`cancelInstall` 返回 `too-late` 的分支单独断言。
 - 路由硬化：非 loopback、`Forwarded` / `X-Forwarded-For`、`Origin` ≠ `Host`、GET 触发写操作 —— 四类请求均被拒绝。
-- 预览只读：①–⑤ 期间对文件系统做只读快照比对，断言零写入。
+- 预览只读：①–⑤ 期间不写 profile / skills / 用户落点；若来源是 zip，仅允许在插件工作目录 `dsh-brittle-backup\extracted\` 生成解压缓存，再做只读校验。
 
 **端到端演练（发版前必做）**
 1. 在本机 profile 导出 → 换一台机器 / 干净 profile 导入 → 断言"插件齐全、模型可用（补 key 后）、skills 就位"。
@@ -822,7 +822,7 @@ credentials ──┘                                      │   └─ skills\�
 | ✅ **M1 采集与产物** | profile/插件/模型/skills 采集；密钥剥离；JSON + 文档生成；本地导出 | 单元测试通过；S2 达成（产物零密钥） |
 | ✅ **M2 恢复** | 校验、预览计划、§7 全部 14 项检查、深度合并写入、快照回滚、取消 | 集成测试通过；S6 达成（失败 / 取消都能回滚） |
 | ✅ **M3 兜底文档定稿** | 文档模板（含"本次包含什么"、可粘贴片段、默认模型回落）+ 自动化盲测脚本 | 模板完成；**盲测脚本** `scripts/doc-audit.mjs` 已能对真实产物逐项判定"只看文档能否重配"，并有正反两个用例；人工盲测仍留给你 |
-| ✅ **M4 UI** | 顶层设置页（`settings.section`）：导出勾选与落点、导入向导（预览 / 14 项检查 / 逐项勾选 / 进度 / 取消）、降级提示 | 客户端契约实测确认（`__ModuleLoader__` 工厂 + `slots.register`）；宿主侧仿真断言装载形状 / 注册参数 / 渲染内容 / 无服务降级 |
+| ✅ **M4 UI** | 顶层设置页（`settings.section`）：导出勾选与落点复用 / 打开、默认 zip、导入人话摘要 + 可展开 14 项检查表、百分比进度 / 彩色结果 / 取消、降级提示 | 客户端契约实测确认（`__ModuleLoader__` 工厂 + `slots.register`）；宿主侧仿真断言装载形状 / 注册参数 / 渲染内容 / 无服务降级 |
 | ⏳ **M5 阶段一验收** | 降级分支演练、密钥扫描、盲测、卸载无残留、**真实 DSH 加载** | §14 全表打勾（**需要你在真实 DSH 里装一次**） |
 | 🔜 **M6 WebDAV**（阶段二） | 双模式、MKCOL/PUT/**PROPFIND**/GET/**DELETE**、重定向、超时/上限、错误文案、**远端保留清理** | S3 达成 + 历史保留与清理验证 |
 | 🔜 **M7 GitHub**（阶段二） | Gist（覆盖式）+ **私有仓库 Contents API（历史 + 清理）** | 真实 Gist 与私有仓库演练均通过 |
@@ -858,7 +858,7 @@ credentials ──┘                                      │   └─ skills\�
 - [ ] 兜底文档在**不看源码、不问题作者**的情况下能指导完成重配（S4）。
 - [ ] 兜底文档不含主机名 / 账号名 / 配置原文 / 本机路径。
 - [ ] 导入来源三分支正确（目录自身含 `backup.json` / 子目录多份列出候选 / 零份报错）。
-- [ ] 校验与预览阶段零写入（只读断言）。
+- [ ] 校验与预览阶段不写 profile / skills / 用户落点；zip 预览仅允许在插件工作目录生成解压缓存。
 - [ ] 导入一次含 5 个插件的产物：已装项对齐启用状态、缺失项逐项安装、失败项隔离、合并语义生效。
 - [ ] skills 目录树（含子目录与二进制）逐字节往返一致。
 - [ ] 缺 key 提示正确区分"已配置 / 缺失"。
@@ -947,17 +947,19 @@ credentials ──┘                                      │   └─ skills\�
 
 | 方法 | 路径 | 请求体 | 响应 | 副作用 |
 |---|---|---|---|---|
-| GET | `/brittle-backup/state` | — | `{ task: { id, kind: 'export' \| 'import', phase, progress, startedAt, result?, error? } }` | **无** |
-| POST | `/brittle-backup/export` | `{ options, targetDir }` | `{ taskId }` | 写导出目录 |
+| GET | `/brittle-backup/state` | — | `{ task: { id, kind: 'export' \| 'import', phase, progress, percent, startedAt, result?, error? } }` | **无** |
+| POST | `/brittle-backup/export` | `{ options, targetDir }`（`options.compress` 默认 `true`） | `{ taskId }` | 写导出目录或 zip |
+| POST | `/brittle-backup/open` | `{ path }` | `{ opened, path, via }` | 调起系统文件管理器，不写文件 |
+| POST | `/brittle-backup/query` | `{ sourceDir, detail }` | `{ ok, text, source, zip?, summary }` | 从②导入来源读取 backup.json / zip，生成安全查询文本 |
 | POST | `/brittle-backup/inspect` | `{ sourceDir }` | `{ artifact, checks[14], diff[], plan }` | **无**（只读预览） |
 | POST | `/brittle-backup/pick` | `{ path? }` | `{ path, via: 'host-picker' \| 'registered' }` | 宿主发起选择，或登记一次客户端选择器的返回值 |
 | POST | `/brittle-backup/import` | `{ sourceDir, selection }` | `{ taskId }` | 写 profile 配置 / skills |
 | POST | `/brittle-backup/cancel` | `{ taskId }` | `{ canceled, rolledBack, residuals[] }` | 回滚已写入项 |
 
-- **任务状态由宿主侧持有**（内存）：页面轮询 `GET state`，重开设置页可见进度与结果；DSH 重启则任务丢失，**不承诺续跑**（D5）。
+- **任务状态由宿主侧持有**（内存）：页面轮询 `GET state`，重开设置页可见进度、结果与导出最终完成时间（`finishedAt`）；DSH 重启则任务丢失，**不承诺续跑**（D5）。
 - **同一时刻只允许一个写任务**；已有写任务进行中时，第二个写请求返回 `409`。
 - `targetDir` / `sourceDir` **必须命中"最近一次选择器返回值"白名单**（一次性、用后失效）；否则 `403`。页面自由构造的路径一律拒绝。
-- 错误响应统一 `{ error: { code, message, detail? } }`，`code` 取稳定枚举：`ARTIFACT_INVALID`、`ARTIFACT_VERSION_UNSUPPORTED`、`AGENTS_RUNNING`、`SERVICE_UNAVAILABLE`、`PICKER_NOT_ALLOWED`、`PATH_UNSAFE`、`BUSY`、`CANCELED`、`ROLLBACK_INCOMPLETE`。
+- 错误响应统一 `{ error: { code, message, detail? } }`，`code` 取稳定枚举：`ARTIFACT_INVALID`、`ARTIFACT_VERSION_UNSUPPORTED`、`ARCHIVE_INVALID`、`ZIP_FAILED`、`AGENTS_RUNNING`、`SERVICE_UNAVAILABLE`、`PICKER_NOT_ALLOWED`、`PATH_UNSAFE`、`BUSY`、`CANCELED`、`ROLLBACK_INCOMPLETE`。
 - 无 UI（`webServer` 或客户端 slots 不可用）时，宿主侧仍按 §4.2 降级：本期**不提供**命令 / 工具入口（U24），因此这种情况下仅内部能力可用。
 
 ### 17.3 客户端半契约（M4 已实现，2026-10-02 实测确认）
@@ -982,7 +984,7 @@ window.__ModuleLoader__.load({ id: '<npm 包名>', factory: (require) => { /* �
   `id` 必须自用（复用已存在 id 会顶掉那一页）；当前占用 id：`account`、`general`、`models`、`plugins`、`agency-agents`、`skills-manager`、`agent-presets`、`market`、`better-sidebar`。
 - **目录选择**：客户端 `uiWorkspace.pickDirectory()`（用嵌套 `inject(['uiWorkspace'])` 取，缺失就退化为"把绝对路径登记进来"）。
 - 页面**只**通过 §17.2 的路由与宿主通信，不直接操作文件系统；不注册工具、不注册聊天命令（U24 / D4）。
-- 页面结构（U1 / U3 / U4）：一个设置页内三个面板 —— ① 导出（6 个勾选项 + 落点）、② 导入（来源 → 只读预览 → 14 项检查 + 逐项勾选 + `allowBuilds` 显式确认 → 开始导入）、③ 任务进度（阶段 / 警告 / 结果 / 取消）。
+- 页面结构（U1 / U3 / U4）：一个设置页内三个功能区 —— ① 导出（7 个勾选项，含默认开启的 zip 压缩 + 落点复用 / 打开按钮）、② 导入（来源 → 人话摘要 → 可展开的完整 14 项验证表 + 备份配置查询 / 复制 + 逐项勾选 + `allowBuilds` 显式确认 → 开始导入）、③ 任务进度（阶段 / 百分比进度条 / 彩色成功失败结果 / 警告 / 取消）；备份配置查询（从②导入来源读取 backup.json 或 zip，生成安全摘要 / 脱敏详细结构 / 预览 / 复制 / 下载）。
 
 ### 17.4 文件写入与回滚策略（U34）
 

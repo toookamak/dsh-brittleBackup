@@ -82,8 +82,15 @@ export async function applyPlan({
     restartRequired: true,
   }
 
+  // 进度：导入的 30%–90% 归写入阶段（前面 10% 是校验、25% 是快照、最后 95% 是收尾）。
+  const reportProgress = () => {
+    const done = report.applied.length + report.failed.length
+    const total = Math.max(1, plan.length)
+    task?.setProgress?.(done, total, 30 + Math.round(60 * Math.min(1, done / total)))
+  }
+
   // ---- 写前快照 ----
-  task?.setPhase?.('snapshot', '正在写前快照')
+  task?.setPhase?.('snapshot', '正在写前快照', 25)
   const targets = []
   if (configItems.length > 0) targets.push({ path: join(profile, 'cordis.patch.yml'), type: 'file' })
   if (workspaceItem !== undefined) targets.push({ path: join(profile, 'pnpm-workspace.yaml'), type: 'file' })
@@ -93,7 +100,7 @@ export async function applyPlan({
 
   await withRollback(snapshot.dir, env, async () => {
     // ---- 1. 配置条目：按 patch id 合并写入 ----
-    task?.setPhase?.('apply', '正在写配置条目')
+    task?.setPhase?.('apply', '正在写配置条目', 30)
     for (const item of configItems) {
       task?.throwIfCanceled?.()
       const entry = configEntryById(artifact, item.ref)
@@ -117,12 +124,11 @@ export async function applyPlan({
       } catch (error) {
         report.failed.push({ kind: 'config', ref: item.ref, reason: error?.message ?? String(error) })
       }
-      task?.setProgress?.(report.applied.length + report.failed.length, plan.length)
+      reportProgress()
     }
 
     // ---- 2. pnpm-workspace.yaml（代码执行许可，需显式确认） ----
-    if (workspaceItem !== undefined) {
-      const file = artifact.items.files.find(item => item.path === 'pnpm-workspace.yaml')
+    if (workspaceItem !== undefined) {      const file = artifact.items.files.find(item => item.path === 'pnpm-workspace.yaml')
       if (file === undefined || typeof file.text !== 'string') {
         report.failed.push({ kind: 'file', ref: 'pnpm-workspace.yaml', reason: '产物里没有它的原文' })
       } else {
@@ -136,7 +142,7 @@ export async function applyPlan({
     }
 
     // ---- 3. 插件：已装对齐启用状态，缺失才安装 ----
-    task?.setPhase?.('apply', '正在处理插件')
+    task?.setPhase?.('apply', '正在处理插件', 55)
     for (const item of pluginItems) {
       task?.throwIfCanceled?.()
       const plugin = artifact.items.plugins.find(entry => entry.name === item.ref)
@@ -180,11 +186,11 @@ export async function applyPlan({
         if (error?.code === 'CANCELED') throw error
         report.failed.push({ kind: 'plugin', ref: item.ref, reason: error?.message ?? String(error) })
       }
-      task?.setProgress?.(report.applied.length + report.failed.length, plan.length)
+      reportProgress()
     }
 
     // ---- 4. skills：只处理勾选了文件、且被选中的 ----
-    task?.setPhase?.('apply', '正在写入 skills')
+    task?.setPhase?.('apply', '正在写入 skills', 80)
     for (const item of skillItems) {
       task?.throwIfCanceled?.()
       const source = join(artifactDir, 'skills', item.ref)
@@ -200,10 +206,11 @@ export async function applyPlan({
       } catch (error) {
         report.failed.push({ kind: 'skill', ref: item.ref, reason: error?.message ?? String(error) })
       }
-      task?.setProgress?.(report.applied.length + report.failed.length, plan.length)
+      reportProgress()
     }
 
     // ---- 5. 缺 key 名单（只报告，永不读值） ----
+    task?.setPhase?.('verify', '正在核对密钥状态', 92)
     const credential = await credentialStates(ctx, artifact.items.requiredCredentials)
     report.credentialStates = credential.state
     report.missingCredentials = missingCredentialList(credential.state)

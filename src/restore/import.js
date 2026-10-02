@@ -44,7 +44,7 @@ export function publicHostView(host) {
  * 校验失败即止，**不写任何文件**。
  */
 export async function inspectImport({ ctx, env = process.env, sourceDir, selection = null, logger = null } = {}) {
-  const located = await locateArtifact(sourceDir)
+  const located = await locateArtifact(sourceDir, { env })
   if (!located.ok) return { ok: false, code: located.code, reason: located.reason, candidates: located.candidates }
 
   const read = await readArtifact(located.dir)
@@ -59,6 +59,9 @@ export async function inspectImport({ ctx, env = process.env, sourceDir, selecti
   return {
     ok: true,
     dir: located.dir,
+    /** 'dir' = 直接读目录；'zip' = 从压缩包解压后读（体验优化项 2）。 */
+    source: located.source ?? 'dir',
+    zip: located.zip ?? null,
     bytes: read.bytes,
     artifact: read.value,
     artifactWarnings: read.warnings,
@@ -83,7 +86,7 @@ export async function inspectImport({ ctx, env = process.env, sourceDir, selecti
  * 有全局拦截项就直接拒绝，连快照都不建。
  */
 export async function runImport({ ctx, env = process.env, sourceDir, selection = {}, task = null, logger = null } = {}) {
-  task?.setPhase?.('inspect', '正在校验产物与检查兼容性')
+  task?.setPhase?.('inspect', '正在校验产物并跑 14 项兼容性检查', 10)
   const inspected = await inspectImport({ ctx, env, sourceDir, selection, logger })
   if (!inspected.ok) throw new ImportError(inspected.code, inspected.reason, inspected)
 
@@ -111,6 +114,7 @@ export async function runImport({ ctx, env = process.env, sourceDir, selection =
   return {
     direction: 'import',
     dir: inspected.dir,
+    source: inspected.source,
     planSummary: inspected.planSummary,
     checksSummary: inspected.checksSummary,
     ...report,

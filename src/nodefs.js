@@ -29,6 +29,11 @@ export async function readTextFile(path) {
   return await readFile(path, 'utf8')
 }
 
+/** 读原始字节（zip 打包与解包用；二进制不能过 utf8）。 */
+export async function readBytes(path) {
+  return await readFile(path)
+}
+
 export async function readJsonFile(path) {
   return JSON.parse(await readTextFile(path))
 }

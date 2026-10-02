@@ -1,11 +1,11 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { join } from 'node:path'
+import { join, basename } from 'node:path'
 import { DEFAULT_OPTIONS } from '../src/settings.js'
 import { runExport } from '../src/export.js'
 import { inspectImport, runImport } from '../src/restore/import.js'
 import { listSnapshots } from '../src/restore/snapshot.js'
-import { ensureDir, listTree, pathExists, readTextFile } from '../src/nodefs.js'
+import { ensureDir, listNames, listTree, pathExists, readTextFile } from '../src/nodefs.js'
 import { TaskRegistry } from '../src/task.js'
 import { makeFakeHost } from './helpers/fake-host.js'
 
@@ -56,13 +56,14 @@ function hostOptions(extra = {}) {
   }
 }
 
+/** 目录形态的导出（体验优化项 2 之前的老形态）：本文件里多数用例断言的就是它。 */
 async function exportFrom(host, exportRoot, options = {}) {
   await ensureDir(exportRoot)
   return await runExport({
     ctx: host.ctx,
     env: host.env,
     targetDir: exportRoot,
-    options: { ...DEFAULT_OPTIONS, skillFiles: true, ...options },
+    options: { ...DEFAULT_OPTIONS, skillFiles: true, compress: false, ...options },
   })
 }
 
@@ -108,15 +109,38 @@ test('端到端：预览阶段只读（校验 / 14 项 / diff 都不写盘）', 
   await exportFrom(source, exportRoot)
 
   const target = await makeFakeHost(hostOptions({ skills: {} }))
-  const before = await listTree(target.env.DSH_HOME)
+  const beforeProfile = await listTree(target.env.DSH_PROFILE_DIR)
+  const beforeSkills = await listTree(join(target.env.DSH_HOME, 'skills'))
   const inspected = await inspectImport({ ctx: target.ctx, env: target.env, sourceDir: exportRoot })
-  const after = await listTree(target.env.DSH_HOME)
 
   assert.equal(inspected.ok, true, inspected.reason)
   assert.equal(inspected.checks.length, 14)
-  assert.deepEqual(after, before, '预览不得产生任何文件变化')
+  assert.deepEqual(await listTree(target.env.DSH_PROFILE_DIR), beforeProfile, '预览不得改动 profile 配置')
+  assert.deepEqual(await listTree(join(target.env.DSH_HOME, 'skills')), beforeSkills, '预览不得改动 skills')
   assert.ok(inspected.plan.some(item => item.kind === 'config' && item.action === 'merge'))
   assert.ok(inspected.plan.some(item => item.kind === 'skill' && item.action === 'copy'))
+})
+
+test('端到端：预览 zip 产物只写插件工作目录里的解压缓存', async () => {
+  const source = await makeFakeHost(hostOptions())
+  const exportRoot = join(source.root, 'backups')
+  await ensureDir(exportRoot)
+  const exported = await runExport({ ctx: source.ctx, env: source.env, targetDir: exportRoot, options: { ...DEFAULT_OPTIONS, skillFiles: true } })
+  assert.equal(exported.packaging, 'zip')
+
+  const target = await makeFakeHost(hostOptions({ skills: {} }))
+  const beforeProfile = await listTree(target.env.DSH_PROFILE_DIR)
+  const inspected = await inspectImport({ ctx: target.ctx, env: target.env, sourceDir: exportRoot })
+
+  assert.equal(inspected.ok, true, inspected.reason)
+  assert.equal(inspected.source, 'zip', '从压缩包读的必须如实报告来源')
+  assert.equal(await pathExists(join(inspected.dir, 'backup.json')), true)
+  assert.deepEqual(await listTree(target.env.DSH_PROFILE_DIR), beforeProfile, '解压缓存不能碰到 profile')
+
+  // 预览阶段允许写的**只有** <DSH_HOME>\dsh-brittle-backup\extracted\（FORMAT.md §5）。
+  const workTree = await listTree(join(target.env.DSH_HOME, 'dsh-brittle-backup'))
+  const unexpected = workTree.filter(entry => entry.rel !== 'extracted' && !entry.rel.startsWith('extracted/'))
+  assert.deepEqual(unexpected, [], '预览只允许在插件工作目录里落解压缓存')
 })
 
 test('端到端：导入把配置合并写回、把 skills 目录树逐字节复制', async () => {
@@ -205,4 +229,45 @@ test('端到端：agent 忙碌时拒绝写入（且不建快照）', async () =>
     error => error?.code === 'CHECKS_BLOCKED',
   )
   assert.equal((await listSnapshots(target.env)).length, 0, '被拦截时不应该创建快照')
+})
+
+test('端到端（默认压缩）：导出只留一个 zip，导入时自动解压并逐字节还原 skills', async () => {
+  const source = await makeFakeHost(hostOptions())
+  const exportRoot = join(source.root, 'backups')
+  await ensureDir(exportRoot)
+  const report = await runExport({
+    ctx: source.ctx,
+    env: source.env,
+    targetDir: exportRoot,
+    options: { ...DEFAULT_OPTIONS, skillFiles: true },
+  })
+
+  // ① 交付物就是一个 zip，临时目录已经删掉，落点里没有别的残留
+  assert.equal(report.packaging, 'zip', JSON.stringify(report))
+  assert.match(report.dir, /dsh-brittle-backup-\d{8}-\d{6}\.zip$/)
+  assert.equal(await pathExists(report.dir), true)
+  assert.equal(report.unpackedDir, null, '打包成功后临时目录必须删掉（用户只选择"只留 zip"）')
+  assert.deepEqual((await listNames(exportRoot)).map(entry => entry.name), [basename(report.dir)])
+  assert.equal(report.zipBytes > 0, true)
+  assert.deepEqual(Object.keys(report.options).sort(), ['doc', 'models', 'plugins', 'profile', 'skillFiles', 'skills'], '报告里的 options 也只有内容项')
+
+  // ② 产物里的 options 不该被压缩选项污染（compress 是运输层，不是内容）
+  const inspected = await inspectImport({ ctx: source.ctx, env: source.env, sourceDir: exportRoot })
+  assert.equal(inspected.ok, true, inspected.reason)
+  assert.equal(inspected.source, 'zip')
+  assert.equal(inspected.artifact.options.compress, undefined, 'backup.json 的 options 只记内容项')
+  assert.equal(inspected.checks.length, 14)
+
+  // ③ 换一台机器导入：解压 → 校验 → 写入，skills 逐字节一致
+  const target = await makeFakeHost(hostOptions({ skills: {} }))
+  const imported = await runImport({
+    ctx: target.ctx,
+    env: target.env,
+    sourceDir: exportRoot,
+    selection: { ackBuildScripts: true, overwriteSkills: ['skill-a'] },
+  })
+  assert.equal(imported.source, 'zip')
+  assert.ok(imported.applied.some(item => item.kind === 'config' && item.ref === 'llm-pi-ai'))
+  assert.ok(imported.applied.some(item => item.kind === 'skill' && item.ref === 'skill-a'))
+  assert.equal(await readTextFile(join(target.env.DSH_HOME, 'skills', 'skill-a', 'assets', 'logo.bin')), 'binary-content-a')
 })

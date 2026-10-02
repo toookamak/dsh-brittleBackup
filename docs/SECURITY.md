@@ -110,7 +110,9 @@ DSH_BRITTLE_BACKUP_GITHUB_TOKEN__<目标id>
    - 客户端选择器兜底：页面用 `uiWorkspace.pickDirectory()` 选完，再 `POST /pick { path }` **登记一次**；宿主只接受"存在的绝对目录路径"，登记后**一次性**生效；
    - `/export` 与 `/inspect` 的 `targetDir` / `sourceDir` 必须命中白名单并**用掉即失效**，否则 `403 PICKER_NOT_ALLOWED`；页面自由构造的路径一律拒绝。
 6. **任务状态端点只读**：进度 / 结果查询不得有副作用，也不得回显产物中的敏感字段。
-7. **同一时刻只允许一个任务**：并发写请求返回 `409 BUSY`（防止两次导入互相踩）。
+7. **打开目录单独硬化**：`POST /brittle-backup/open` 只接受存在的绝对目录，仍受 loopback、转发头与同源校验保护；它只调用系统文件管理器，不读取目录内容、不经过 shell、不修改文件。
+8. **配置查询只读且脱敏**：`POST /brittle-backup/query` 只读取②导入来源中的 `backup.json`（目录或 zip 自动定位），来源必须先通过 `/pick` 白名单；输出过滤 API Key、Token、密码、主机名和本机绝对路径。详细模式只展示脱敏结构与配置名，不展示秘密值。
+9. **同一时刻只允许一个任务**：并发写请求返回 `409 BUSY`（防止两次导入互相踩）。
 
 > 📌 **待确认（实现前实测一次）**：宿主已有官方信任闸门 `connection.requestRejection(request)` / `admit(request)` / `authorizeIndex(...)`。若其覆盖面与本节 1–3 一致，**优先复用它并删除自研重复逻辑**；否则保留本节自研实现，并在 §17.7 记录结论。
 

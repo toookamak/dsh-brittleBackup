@@ -37,6 +37,8 @@ export class TaskRegistry {
       phase: 'prepare',
       message: '',
       progress: { done: 0, total: 0 },
+      /** 0–100，单调不回退（体验优化项 3）：UI 的进度条只依赖它。 */
+      percent: 0,
       warnings: [],
       canceled: false,
       finishedAt: null,
@@ -48,8 +50,8 @@ export class TaskRegistry {
         task.cancelReason = reason
         controller.abort(new CanceledError(reason))
       },
-      setPhase: (phase, message = '') => registry.#setPhase(task, phase, message),
-      setProgress: (done, total) => registry.#setProgress(task, done, total),
+      setPhase: (phase, message = '', percent = undefined) => registry.#setPhase(task, phase, message, percent),
+      setProgress: (done, total, percent = undefined) => registry.#setProgress(task, done, total, percent),
       addWarning: (message) => registry.warn(task, message),
       throwIfCanceled: () => registry.#throwIfCanceled(task),
       finish: (result) => registry.finish(task, result),
@@ -59,15 +61,24 @@ export class TaskRegistry {
     return task
   }
 
-  #setPhase(task, phase, message) {
+  #setPhase(task, phase, message, percent = undefined) {
     task.phase = phase
     task.message = message
+    if (typeof percent === 'number') this.#setPercent(task, percent)
     this.#throwIfCanceled(task)
   }
 
-  #setProgress(task, done, total) {
+  #setProgress(task, done, total, percent = undefined) {
     task.progress = { done, total }
+    if (typeof percent === 'number') this.#setPercent(task, percent)
     this.#throwIfCanceled(task)
+  }
+
+  /** 百分比单调递增：任何一步都不允许把进度条往回拽。 */
+  #setPercent(task, value) {
+    if (!Number.isFinite(value)) return
+    const clamped = Math.max(0, Math.min(100, Math.round(value)))
+    if (clamped > task.percent) task.percent = clamped
   }
 
   #throwIfCanceled(task) {
@@ -81,6 +92,7 @@ export class TaskRegistry {
   finish(task, result) {
     task.result = result ?? null
     task.phase = 'done'
+    task.percent = 100
     task.finishedAt = new Date().toISOString()
     this.#release(task)
   }
@@ -88,6 +100,7 @@ export class TaskRegistry {
   fail(task, error) {
     task.error = { code: error?.code ?? 'ERROR', message: error?.message ?? String(error) }
     task.phase = 'failed'
+    // 失败时**不**把 percent 推到 100：进度条停在断点上，用户看得见卡在哪里。
     task.finishedAt = new Date().toISOString()
     this.#release(task)
   }
@@ -114,6 +127,7 @@ export class TaskRegistry {
         phase: task.phase,
         message: task.message,
         progress: task.progress,
+        percent: task.percent,
         warnings: [...task.warnings],
         canceled: task.canceled === true,
         startedAt: task.startedAt,

@@ -17,7 +17,7 @@ test('插件入口：只挂路由，不做别的事；没有任何服务也不�
     effect: callback => callback(),
   }
   assert.doesNotThrow(() => apply(ctx, undefined))
-  assert.equal(routes.length, 6)
+  assert.equal(routes.length, 8)
   assert.ok(routes.every(route => route.path.startsWith(ROUTE_PREFIX)))
 
   const bare = {

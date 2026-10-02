@@ -95,30 +95,34 @@ async function setup() {
   return { host, call, headers, tasks, waitForTask }
 }
 
-test('端到端（走路由）：导出 → 预览 → 导入，并留下快照', async () => {
+test('端到端（走路由）：导出（默认压成 zip）→ 预览 → 导入，并留下快照', async () => {
   const { host, call, headers, waitForTask } = await setup()
   const exportRoot = join(host.root, 'backups')
   await ensureDir(exportRoot)
 
-  // ① 选落点（登记一次）→ 导出
+  // ① 选落点（登记一次）→ 导出（不传 compress，走默认 = 压缩）
   assert.equal((await call('/pick', { method: 'POST', headers, body: { path: exportRoot } })).status, 200)
   const exportStart = await call('/export', { method: 'POST', headers, body: { options: { ...DEFAULT_OPTIONS, skillFiles: true }, targetDir: exportRoot } })
   assert.equal(exportStart.status, 202)
   const exportTask = await waitForTask()
   assert.equal(exportTask.error, null, JSON.stringify(exportTask.error))
   assert.equal(exportTask.result.direction, 'export')
-  const artifactDir = exportTask.result.dir
-  assert.equal(await pathExists(join(artifactDir, 'backup.json')), true)
-  assert.equal(await pathExists(join(artifactDir, '兜底文档.md')), true)
-  assert.equal(await pathExists(join(artifactDir, 'skills', 'skill-a', 'assets', 'logo.bin')), true)
-  assert.equal((await readTextFile(join(artifactDir, 'backup.json'))).includes(SECRET), false)
+  assert.equal(exportTask.result.packaging, 'zip', '默认必须压成 zip')
+  assert.equal(exportTask.percent, 100, '任务成功后进度必须是 100')
+  const archive = exportTask.result.dir
+  assert.match(archive, /dsh-brittle-backup-\d{8}-\d{6}\.zip$/)
+  assert.equal(await pathExists(archive), true)
+  assert.equal(exportTask.result.unpackedDir, null, '打包成功后不留未压缩目录')
 
-  // ② 选来源 → 只读预览
+  // ② 选来源 → 只读预览（从 zip 自动解压）
   assert.equal((await call('/pick', { method: 'POST', headers, body: { path: exportRoot } })).status, 200)
   const inspect = await call('/inspect', { method: 'POST', headers, body: { sourceDir: exportRoot } })
   assert.equal(inspect.status, 200)
+  assert.equal(inspect.payload.source, 'zip')
   assert.equal(inspect.payload.checks.length, 14)
   assert.equal(inspect.payload.blocked, false)
+  assert.equal(await pathExists(join(inspect.payload.dir, 'backup.json')), true)
+  assert.equal((await readTextFile(join(inspect.payload.dir, 'backup.json'))).includes(SECRET), false)
   assert.ok(inspect.payload.plan.some(item => item.kind === 'config' && item.action === 'merge'))
   assert.ok(inspect.payload.plan.some(item => item.kind === 'skill' && item.action === 'copy'))
 
@@ -130,6 +134,7 @@ test('端到端（走路由）：导出 → 预览 → 导入，并留下快照'
   assert.equal(importTask.error, null, JSON.stringify(importTask.error))
   const report = importTask.result
   assert.equal(report.direction, 'import')
+  assert.equal(report.source, 'zip')
   assert.ok(report.applied.some(item => item.kind === 'config' && item.ref === 'llm-pi-ai'))
   assert.ok(report.applied.some(item => item.kind === 'file' && item.ref === 'pnpm-workspace.yaml'))
   assert.ok(report.applied.some(item => item.kind === 'skill' && item.ref === 'skill-a'))
@@ -143,6 +148,22 @@ test('端到端（走路由）：导出 → 预览 → 导入，并留下快照'
 
   // ④ 快照留下了
   assert.equal((await listSnapshots(host.env)).length >= 1, true)
+})
+
+test('端到端（走路由）：关掉压缩时落点里是未压缩目录', async () => {
+  const { host, call, headers, waitForTask } = await setup()
+  const exportRoot = join(host.root, 'backups-plain')
+  await ensureDir(exportRoot)
+  await call('/pick', { method: 'POST', headers, body: { path: exportRoot } })
+  const start = await call('/export', { method: 'POST', headers, body: { options: { ...DEFAULT_OPTIONS, compress: false }, targetDir: exportRoot } })
+  assert.equal(start.status, 202)
+  const task = await waitForTask()
+  assert.equal(task.error, null, JSON.stringify(task.error))
+  assert.equal(task.result.packaging, 'dir')
+  assert.equal(await pathExists(join(task.result.dir, 'backup.json')), true)
+  assert.equal(await pathExists(join(task.result.dir, '兜底文档.md')), true)
+  assert.equal(task.result.unpackedDir, task.result.dir)
+  assert.equal((await readTextFile(join(task.result.dir, 'backup.json'))).includes(SECRET), false)
 })
 
 test('端到端（走路由）：拦截级检查项存在时，导入请求被拒绝且不建快照', async () => {

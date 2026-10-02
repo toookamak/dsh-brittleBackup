@@ -1,24 +1,33 @@
 /**
- * 产物（FORMAT.md 的唯一实现侧权威）：组装、校验、落盘、读取。
+ * 产物（FORMAT.md 的唯一实现侧权威）：组装、校验、落盘、定位、读取。
  *
  * 产物 = 一个目录：
  *   dsh-brittle-backup-<ts>\
  *     backup.json      权威产物
  *     兜底文档.md       附件（自包含可分享）
  *     skills\          附件（勾选时，逐字节）
+ *
+ * 导出时默认把该目录**打成同名 zip**（运输层选项 `options.compress`，见 export.js）；
+ * 导入时 `locateArtifact` 既能认目录，也能认这个 zip（自动解压后走完全相同的校验路径）。
  */
-import { join } from 'node:path'
+import { basename, join } from 'node:path'
 import {
   ARTIFACT_FORMAT,
   ARTIFACT_PREFIX,
   ARTIFACT_VERSION,
+  ARTIFACT_ZIP_SUFFIX,
   BACKUP_FILE,
   DOC_FILE,
+  EXTRACTED_KEEP,
   SKILLS_DIRNAME,
+  assertWithin,
   checkArtifactPath,
+  extractedRoot,
+  isArtifactArchiveName,
   timestamp,
 } from './paths.js'
-import { copyTree, listNames, pathExists, readJsonFile, readTextFile, writeJsonAtomic, writeTextAtomic } from './nodefs.js'
+import { copyTree, ensureDir, listNames, pathExists, readJsonFile, readTextFile, removeTree, writeJsonAtomic, writeTextAtomic } from './nodefs.js'
+import { extractZip } from './zip.js'
 
 /** 宽松防爆上限（FORMAT.md §7）——本地模式没有远端限额，只防异常产物撑爆磁盘。 */
 export const LIMITS = Object.freeze({
@@ -270,28 +279,85 @@ export async function writeArtifact({
 }
 
 /**
- * 定位产物：目录自身含 backup.json 直接用；否则在其直接子目录里找匹配前缀的候选。
- * @returns {{ok:true,dir:string}|{ok:false,code:string,candidates:string[],reason:string}}
+ * 定位产物：目录自身含 backup.json 直接用；否则在其直接子目录里找匹配前缀的候选；
+ * 再否则找 `dsh-brittle-backup-*.zip` 并**自动解压到插件工作目录**（体验优化项 2）。
+ * @returns {{ok:true,dir:string,source:'dir'|'zip',zip?:string}|{ok:false,code:string,candidates:string[],reason:string}}
  */
-export async function locateArtifact(inputDir, { readDir = listNames } = {}) {
-  if (await pathExists(join(inputDir, BACKUP_FILE))) return { ok: true, dir: inputDir }
+export async function locateArtifact(inputDir, { readDir = listNames, env = process.env, extract = extractArtifactZip } = {}) {
+  if (await pathExists(join(inputDir, BACKUP_FILE))) return { ok: true, dir: inputDir, source: 'dir' }
   const children = await readDir(inputDir)
-  const candidates = []
+  const found = []
   for (const child of children) {
-    if (!child.directory) continue
-    if (!child.name.startsWith(ARTIFACT_PREFIX)) continue
-    if (await pathExists(join(inputDir, child.name, BACKUP_FILE))) candidates.push(join(inputDir, child.name))
+    if (child.directory) {
+      if (child.name.startsWith(ARTIFACT_PREFIX) && await pathExists(join(inputDir, child.name, BACKUP_FILE))) {
+        found.push({ kind: 'dir', path: join(inputDir, child.name) })
+      }
+      continue
+    }
+    if (isArtifactArchiveName(child.name)) found.push({ kind: 'zip', path: join(inputDir, child.name) })
   }
-  if (candidates.length === 1) return { ok: true, dir: candidates[0] }
-  if (candidates.length === 0) {
+  if (found.length === 0) {
     return {
       ok: false,
       code: 'ARTIFACT_NOT_FOUND',
       candidates: [],
-      reason: `所选目录里没有 ${BACKUP_FILE}，也没有匹配 ${ARTIFACT_PREFIX}* 的子目录`,
+      reason: `所选目录里没有 ${BACKUP_FILE}，也没有匹配 ${ARTIFACT_PREFIX}* 的子目录或 ${ARTIFACT_ZIP_SUFFIX} 压缩包`,
     }
   }
-  return { ok: false, code: 'ARTIFACT_AMBIGUOUS', candidates, reason: '所选目录里有多个候选产物，请指定其中一个' }
+  if (found.length > 1) {
+    return {
+      ok: false,
+      code: 'ARTIFACT_AMBIGUOUS',
+      candidates: found.map(item => item.path),
+      reason: `所选目录里有 ${found.length} 个候选产物（目录或压缩包），请把它们分开后只指向其中一个`,
+    }
+  }
+
+  const only = found[0]
+  if (only.kind === 'dir') return { ok: true, dir: only.path, source: 'dir' }
+  const extracted = await extract(only.path, { env })
+  if (!extracted.ok) {
+    return {
+      ok: false,
+      code: extracted.code ?? 'ARCHIVE_INVALID',
+      candidates: [only.path],
+      reason: `压缩包无法解压：${extracted.reason}`,
+    }
+  }
+  await pruneExtracted(env, EXTRACTED_KEEP).catch(() => [])
+  return { ok: true, dir: extracted.dir, source: 'zip', zip: only.path }
+}
+
+/**
+ * 把产物 zip 解压到 `<DSH_HOME>\dsh-brittle-backup\extracted\<包名>\`（U34 允许的三处范围之一）。
+ * 解压前先清空同名目录：绝不让上一次的残留文件混进这次校验。
+ */
+export async function extractArtifactZip(zipPath, { env = process.env } = {}) {
+  const root = extractedRoot(env)
+  const destination = join(root, basename(zipPath).replace(/\.zip$/i, ''))
+  assertWithin(root, destination, 'zip 解压目录')
+  await removeTree(destination)
+  await ensureDir(destination)
+  try {
+    const result = await extractZip(zipPath, destination, { stripSingleRoot: true })
+    if (!(await pathExists(join(destination, BACKUP_FILE)))) {
+      await removeTree(destination)
+      return { ok: false, code: 'ARCHIVE_INVALID', reason: `压缩包里没有 ${BACKUP_FILE}` }
+    }
+    return { ok: true, dir: destination, files: result.files.length }
+  } catch (error) {
+    await removeTree(destination).catch(() => {})
+    return { ok: false, code: error?.code ?? 'ARCHIVE_INVALID', reason: error?.message ?? String(error) }
+  }
+}
+
+/** 只保留最近 `keep` 份解压结果（目录名带时间戳 → 字典序即时间序）。 */
+export async function pruneExtracted(env = process.env, keep = EXTRACTED_KEEP) {
+  const root = extractedRoot(env)
+  const names = (await listNames(root)).filter(entry => entry.directory).map(entry => entry.name).sort()
+  const stale = names.slice(0, Math.max(0, names.length - keep))
+  for (const name of stale) await removeTree(join(root, name))
+  return stale
 }
 
 /** 读取 + 校验（先查体积上限，再解析）。 */

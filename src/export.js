@@ -1,17 +1,21 @@
 /**
  * 导出流程（PROJECT-PLAN §6.1 / SCOPE-PHASE1 §2.1）。
  *
- * 步骤固定：采集 → 剥离 → 自查扫描 → 生成文档 → 落盘到**用户自选目录** → 报告。
+ * 步骤固定：采集 → 剥离 → 自查扫描 → 生成文档 → 落盘到**用户自选目录** →（可选）打包成 zip → 报告。
  * 本期没有上传步骤；除了用户选定目录与插件工作目录，不写任何位置。
+ *
+ * 压缩（体验优化项 2）：先把产物写成目录，再打成同名 zip，**zip 成功后才删掉目录**；
+ * 打包失败就保留目录并把原因记成警告 —— 宁可多留一个目录，也不静默丢数据。
  */
-import { join } from 'node:path'
+import { basename, join } from 'node:path'
 import { collectAll, degradationNotes } from './collect/index.js'
 import { renderFallbackDoc } from './doc.js'
 import { buildArtifact, writeArtifact } from './artifact.js'
 import { scanForSecrets, scanTextForSecrets } from './redact.js'
 import { fallbackExportRoot, isWithin, skillsRoot, workDir } from './paths.js'
-import { listNames } from './nodefs.js'
-import { saveSettings } from './settings.js'
+import { listNames, removeTree } from './nodefs.js'
+import { zipDirectory } from './zip.js'
+import { contentOptions, saveSettings } from './settings.js'
 import { credentialStates, credentialStatusLabels } from './credentials.js'
 
 export class ExportError extends Error {
@@ -36,15 +40,18 @@ async function skillSourcesFor(env, skills) {
 
 /**
  * @param targetDir 用户自选目录（必须来自选择器白名单，路由层负责校验）；空则退回内部目录
- * @returns 报告对象（含产物目录、写入清单、警告、降级说明）
+ * @param options 勾选项（含运输层的 `compress`）
+ * @returns 报告对象（含交付物路径、打包形态、写入清单、警告、降级说明）
  */
 export async function runExport({ ctx, env = process.env, targetDir = null, options, task = null, logger = null } = {}) {
-  task?.setPhase?.('collect', '正在采集 profile / 插件 / 模型 / skills')
+  // 即使宿主/调用方没有传完整 options，也遵守产品默认：压缩开启；只有显式 false 才保留目录。
+  const compress = options?.compress !== false
+  task?.setPhase?.('collect', '正在采集 profile / 插件 / 模型 / skills', 10)
   const collected = await collectAll({ ctx, env, options, logger })
   for (const warning of collected.warnings) task?.addWarning?.(warning)
   logger?.info?.(`采集完成：${collected.items.stats.entryCount} 个配置条目、${collected.items.plugins.length} 个插件、${collected.items.models.length} 个 provider、${collected.items.skills.length} 个 skill`)
 
-  task?.setPhase?.('redact', '正在做密钥自查')
+  task?.setPhase?.('redact', '正在做密钥自查', 35)
   const hits = scanForSecrets(collected.items)
   if (hits.length > 0) {
     throw new ExportError('SECRET_SCAN', `产物自查发现 ${hits.length} 处疑似密钥，已拦截导出（未写任何文件）`, hits)
@@ -55,6 +62,7 @@ export async function runExport({ ctx, env = process.env, targetDir = null, opti
 
   let docText = null
   if (collected.options.doc) {
+    task?.setPhase?.('redact', '正在生成兜底文档', 45)
     docText = renderFallbackDoc({
       items: collected.items,
       options: collected.options,
@@ -73,7 +81,8 @@ export async function runExport({ ctx, env = process.env, targetDir = null, opti
     skills,
     stats: { ...collected.items.stats, itemCounts: { ...collected.items.stats.itemCounts, skills: skills.length } },
   }
-  const artifact = buildArtifact({ options: collected.options, producer: collected.producer, items })
+  // 产物里的 options 只记**内容项**：compress 是运输层选项，不进 backup.json（FORMAT.md §1）。
+  const artifact = buildArtifact({ options: contentOptions(collected.options), producer: collected.producer, items })
 
   const fallback = fallbackExportRoot(env)
   const destination = targetDir === null || targetDir === '' ? fallback : targetDir
@@ -81,28 +90,63 @@ export async function runExport({ ctx, env = process.env, targetDir = null, opti
     task?.addWarning?.(`没有目录选择器可用，产物写到了插件工作目录：${fallback}`)
   }
 
-  task?.setPhase?.('write', '正在写入产物')
+  task?.setPhase?.('write', '正在写入产物', 60)
   task?.throwIfCanceled?.()
   const sources = collected.options.skillFiles ? await skillSourcesFor(env, skills) : []
   const written = await writeArtifact({ targetRoot: destination, artifact, docText, options: collected.options, skillSources: sources })
   for (const skipped of written.skillCopy.skipped) task?.addWarning?.(`skill 文件跳过：${skipped.skill}/${skipped.rel}（${skipped.reason}）`)
+
+  // ---- 打包（默认开）----
+  const packagingWarnings = []
+  let packaging = { kind: 'dir', deliverable: written.dir, zip: null, unpackedDir: written.dir, zipBytes: null }
+  if (compress) {
+    task?.setPhase?.('zip', '正在打包成 zip', 80)
+    task?.throwIfCanceled?.()
+    const zipPath = `${written.dir}.zip`
+    try {
+      const zipped = await zipDirectory(written.dir, zipPath)
+      let unpackedDir = null
+      try {
+        await removeTree(written.dir)
+      } catch (error) {
+        // 目录删不掉不算失败：zip 已经是交付物，只是多留了一份临时目录。
+        packagingWarnings.push(`已生成 zip，但临时目录没能删除：${written.dir}（${error?.message ?? String(error)}）`)
+        unpackedDir = written.dir
+      }
+      packaging = { kind: 'zip', deliverable: zipPath, zip: zipPath, zipBytes: zipped.bytes, unpackedDir }
+      logger?.info?.(`已打包：${zipPath}（${zipped.bytes} 字节）`)
+    } catch (error) {
+      // 用户明确勾选 zip 时不能悄悄降级成目录，否则界面会显示"成功"但交付形态不符合选择。
+      // 临时目录仍保留，方便用户重试或手工取回；任务本身标记失败。
+      const failure = new ExportError('ZIP_FAILED', `打包 zip 失败，未生成目录交付物：${error?.message ?? String(error)}`, { dir: written.dir, cause: error })
+      failure.detail = { dir: written.dir, cause: error }
+      throw failure
+    }
+  }
+  for (const warning of packagingWarnings) task?.addWarning?.(warning)
 
   await saveSettings({ lastExportDir: destination }, env)
 
   const degradation = degradationNotes(collected.meta)
   const report = {
     direction: 'export',
-    dir: written.dir,
+    /** 交付物：zip 路径（默认）或未压缩目录。 */
+    dir: packaging.deliverable,
+    packaging: packaging.kind,
+    zip: packaging.zip,
+    unpackedDir: packaging.unpackedDir,
+    zipBytes: packaging.zipBytes,
     files: written.written,
     bytes: Buffer.byteLength(JSON.stringify(artifact), 'utf8'),
-    warnings: [...collected.warnings],
+    warnings: [...collected.warnings, ...packagingWarnings],
     redactionCount: collected.items.redactions.length,
     options: collected.options,
     credentialStatus,
     degradation,
     skillCopy: written.skillCopy,
     restartRequired: false,
+    artifactName: basename(written.dir),
   }
-  logger?.info?.(`导出完成：${written.dir}`)
+  logger?.info?.(`导出完成：${report.dir}`)
   return report
 }

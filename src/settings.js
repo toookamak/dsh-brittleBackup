@@ -20,6 +20,11 @@ export const DEFAULT_OPTIONS = Object.freeze({
   skills: true,
   skillFiles: false,
   doc: true,
+  /**
+   * 打包成 zip（体验优化项 2，默认开）。注意它是**运输层**选项，不是产物内容：
+   * 它不进 `backup.json` 的 `options`（见 FORMAT.md §1），只进设置与导出请求。
+   */
+  compress: true,
 })
 
 export const DEFAULT_SETTINGS = Object.freeze({
@@ -53,6 +58,7 @@ export function normalizeSettings(raw) {
       skills: asBoolean(options.skills, DEFAULT_OPTIONS.skills),
       skillFiles: asBoolean(options.skillFiles, DEFAULT_OPTIONS.skillFiles),
       doc: asBoolean(options.doc, DEFAULT_OPTIONS.doc),
+      compress: asBoolean(options.compress, DEFAULT_OPTIONS.compress),
     },
     snapshotKeep: keep,
     ackBuildScripts: asBoolean(input.ackBuildScripts, DEFAULT_SETTINGS.ackBuildScripts),
@@ -61,6 +67,19 @@ export function normalizeSettings(raw) {
 
 export function settingsPath(env = process.env) {
   return settingsFile(env)
+}
+
+/**
+ * 产物的 `options`（FORMAT.md §2 的那六个内容项）。
+ * `compress` 是运输层选项，写进 `backup.json` 只会让 schema 无意义地膨胀，所以在这里剥掉。
+ */
+export const CONTENT_OPTION_KEYS = Object.freeze(['profile', 'plugins', 'models', 'skills', 'skillFiles', 'doc'])
+
+export function contentOptions(options) {
+  const source = options !== null && typeof options === 'object' ? options : {}
+  const out = {}
+  for (const key of CONTENT_OPTION_KEYS) out[key] = source[key] === true
+  return out
 }
 
 export async function loadSettings(env = process.env) {

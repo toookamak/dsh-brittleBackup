@@ -48,7 +48,8 @@ async function exportFixture() {
   })
   const exportRoot = join(host.root, 'backups')
   await ensureDir(exportRoot)
-  const report = await runExport({ ctx: host.ctx, env: host.env, targetDir: exportRoot, options: { ...DEFAULT_OPTIONS, skillFiles: true } })
+  // 这份用例审的是**目录形态**的产物（doc-audit.mjs 吃目录），所以显式关掉 zip 打包。
+  const report = await runExport({ ctx: host.ctx, env: host.env, targetDir: exportRoot, options: { ...DEFAULT_OPTIONS, skillFiles: true, compress: false } })
   return { host, report }
 }
 

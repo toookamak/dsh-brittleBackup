@@ -12,11 +12,14 @@ export const PACKAGE_NAME = 'dsh-brittlebackup'
 export const ARTIFACT_FORMAT = 'dsh-brittle-backup'
 export const ARTIFACT_VERSION = 1
 export const ARTIFACT_PREFIX = 'dsh-brittle-backup-'
+export const ARTIFACT_ZIP_SUFFIX = '.zip'
 export const BACKUP_FILE = 'backup.json'
 export const DOC_FILE = '兜底文档.md'
 export const SKILLS_DIRNAME = 'skills'
+export const EXTRACTED_DIRNAME = 'extracted'
 export const SETTINGS_FILE = 'settings.json'
 export const SNAPSHOT_KEEP = 10
+export const EXTRACTED_KEEP = 5
 
 /** 导入侧永不写入 / 永不删除的路径段（见 SECURITY.md §6）。 */
 export const EXCLUDED_SEGMENTS = Object.freeze([
@@ -58,6 +61,18 @@ export function skillsRoot(env = process.env) {
 
 export function fallbackExportRoot(env = process.env) {
   return join(workDir(env), 'exports')
+}
+
+/** zip 自动解压的落脚点（插件工作目录内，与快照同级，属于 U34 允许的三处范围之一）。 */
+export function extractedRoot(env = process.env) {
+  return join(workDir(env), EXTRACTED_DIRNAME)
+}
+
+/** 产物 zip 的候选名（`dsh-brittle-backup-<ts>.zip`）。 */
+export function isArtifactArchiveName(name) {
+  return typeof name === 'string' &&
+    name.startsWith(ARTIFACT_PREFIX) &&
+    name.toLowerCase().endsWith(ARTIFACT_ZIP_SUFFIX)
 }
 
 function comparable(path) {

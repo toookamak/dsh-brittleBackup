@@ -2,15 +2,15 @@
 
 > **本文是对外契约。** 任何消费本产物的程序都应只依赖本文描述的内容；本文未描述的一律视为实现细节。
 >
-> **本文是产物 schema 的唯一权威。** [PROJECT-PLAN.md](PROJECT-PLAN.md) §5.1 的早期 JSON 草案（单文件、`files[].lines`、内嵌 `doc.content`、zip 附件、上传语义）**已作废**，只保留为历史记录，与本文件冲突时以本文件为准。
+> **本文是产物 schema 的唯一权威。** [PROJECT-PLAN.md](PROJECT-PLAN.md) §5.1 的早期 JSON 草案（单文件、`files[].lines`、内嵌 `doc.content`、zip 附件、上传语义）**已作废**，只保留为历史记录，与本文件冲突时以本文件为准。当前 zip 是目录产物的本地运输层封装，不改变 `backup.json` schema。
 >
 > **适用范围：阶段一（仅本地导出 / 导入）。** 范围见 [SCOPE-PHASE1.md](SCOPE-PHASE1.md)，边界见 [PROJECT-PLAN.md](PROJECT-PLAN.md) §0，安全策略见 [SECURITY.md](SECURITY.md)，服务签名与路由见 [PROJECT-PLAN.md](PROJECT-PLAN.md) §17。
 
 ---
 
-## 1. 产物 = 一个目录（U30）
+## 1. 产物 = 一个目录，默认以同名 zip 交付（U30）
 
-一次导出产生**一个目录**，写在用户自选的位置（U31）：
+一次导出先产生一个目录，再默认打包为同名 `.zip` 写在用户自选的位置（U31）。取消「打包成 zip」时直接保留目录：
 
 ```
 <用户自选目录>\dsh-brittle-backup-<ts>\
@@ -24,9 +24,10 @@
 - `<ts>` = `YYYYMMDD-HHmmss`（导出机器的本地时间）。
 - 目录名固定此前缀，便于在文件堆里识别与批量拷贝。
 - **重名**：目标位置已存在同名目录时追加 `-2`、`-3` 后缀，**绝不覆盖**既有数据。
-- **没有压缩包**：本地目录不需要 zip，因此不引入压缩依赖，也没有 2 MiB / 256 文件这类为远端限额而设的约束。
+- **默认压缩**：目录内容默认交付为 `dsh-brittle-backup-<ts>.zip`；zip 写成功后临时目录才删除。压缩失败则保留目录并在任务警告中说明。
+- **导入兼容两种形态**：选中的目录自身、唯一的产物子目录、或唯一的 `dsh-brittle-backup-*.zip` 都可作为来源；zip 会先解压到插件工作目录再走相同校验。
 - **附件缺失不影响产物有效**：`兜底文档.md` 或 `skills\` 缺失时 `backup.json` 仍然有效，导入侧如实报告"该附件不存在"。
-- 换机器迁移 = 拷贝整个目录。
+- 换机器迁移 = 拷贝整个目录或 zip 文件。
 
 ---
 
@@ -199,7 +200,7 @@
 6. 兼容性验证 §7 全 14 项（见 [PROJECT-PLAN.md](PROJECT-PLAN.md) §7）。
 7. DSH 版本差异与环境差异对照（U14）→ 报告，**不阻断**。
 
-> **第 1–7 步全程只读**：校验与预览（含 diff）**不得写任何文件**；写入只发生在用户勾选并确认之后（见 [SCOPE-PHASE1.md](SCOPE-PHASE1.md) §2.2）。
+> **第 1–7 步对用户数据全程只读**：目录形态预览不写文件；zip 形态仅会把压缩包解压到插件自己的工作目录 `dsh-brittle-backup\extracted\` 作为校验缓存，不触碰 profile / skills / 用户选定目录。校验与预览（含 diff）对用户数据不得写入；真正的配置、插件、skills 写入只发生在用户勾选并确认之后（见 [SCOPE-PHASE1.md](SCOPE-PHASE1.md) §2.2）。
 
 ---
 
@@ -238,7 +239,7 @@ skills\
 远端传输与多目标为**阶段二**，本期不实现。为将来留出空间：
 
 - 本期**不写入** `targets[]`；将来新增该**可选**字段不提升 `version`（消费者必须忽略未知字段）。
-- 本期不生成 `latest.json` 与 skills zip；将来引入时同样作为可选附加物。
+- 本期不生成 `latest.json` 与独立 skills zip 附件；skills 文件仍作为目录内内容随整体 zip 一起封装。
 
 ---
 
@@ -249,3 +250,4 @@ skills\
 | 2026-10-01 | 初版：单文件产物 + skills zip + 远端目标 |
 | 2026-10-02 | **随阶段一重构**：产物改为一个**目录**；skills 改为 `skills\` 子目录（去掉 zip）；配置改为**结构化条目**；脱敏寻址统一为 JSON Pointer；去掉远端目标 / 历史 / 远端保留；上限改为宽松防爆；新增 `options`（实际勾选）与阶段二预留说明 |
 | 2026-10-02 | **第二次修订（契约收口）**：`secrets[].path` 纠正为**字符串数组**；`plugins[]` 新增 `enabled`（U36）；`producer` 新增 `hostname`，并明确 `dshVersion` 取不到时写 `"unknown"`；新增"字段语义要点"（entries 收录范围与 patch 目标 id、pointer 基准、files 边界、自身 entry 处理）；§5 新增来源选择规则与"1–7 步只读"；§6 明确 skills 为逐字节复制；顶部声明本文为 schema 唯一权威、PROJECT-PLAN §5.1 作废 |
+| 2026-10-02 | **体验优化**：导出默认提供 zip 运输层封装（可关闭）；导入自动解压 zip；预览仅允许在插件工作目录保留解压缓存，不写 profile / skills。 |
