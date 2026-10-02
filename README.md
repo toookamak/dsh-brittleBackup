@@ -28,7 +28,7 @@ DSH（DeepSeek Harness）的**配置 / 插件 / 模型配置**本地导出与导
 
 - [ ] 设置页出现「兜底备份」，顶部显示服务探测（configEditor / pluginManager / credentials / skills）。
 - [ ] 选一个空目录 → 勾选项 → 默认开始导出 → 落点里得到 `dsh-brittle-backup-<ts>.zip`（取消压缩则得到同名目录）；zip 内有 `backup.json` + `兜底文档.md`（勾了 skills 文件还会有 `skills\`）。
-- [ ] 从含 zip 的目录预览 → 自动解压并跑验证；目录形态仍可用 `node scripts/doc-audit.mjs "<产物目录>"` 打印「盲测检查通过」。
+- [ ] 在②导入还原中选择目录，或直接填写 / 选择一个 `.zip` 文件 → 预览时自动解压并跑验证；目录形态仍可用 `node scripts/doc-audit.mjs "<产物目录>"` 打印「盲测检查通过」。
 - [ ] 预览一份产物（只读）→ 人话摘要、可展开的 14 项验证表与导入计划出现 → 勾选 → 开始导入 → 报告含成功 / 失败 / 需手工 / 需补 key。
 - [ ] 在②导入还原中选择备份目录或 zip → 打开「备份配置查询 / 复制」→ 读取 backup.json 生成安全摘要；需要时勾选详细结构 → 复制或下载文本。查询文本不包含密钥值、主机名和本机绝对路径。
 - [ ] 导入中途点「取消」→ 报告显示已回滚；`<DSH_HOME>\dsh-brittle-backup\snapshots\` 里有本次快照。

@@ -167,15 +167,19 @@ function normalizeSelection(input) {
   }
 }
 
-async function requireDirectory(path, { mustExist = true } = {}) {
+async function requirePath(path, { mustExist = true } = {}) {
   if (typeof path !== 'string' || path.trim() === '') return null
   const resolved = path.trim()
   if (!isAbsolute(resolved)) return null
-  if (mustExist) {
-    const info = await stat(resolved).catch(() => null)
-    if (info === null || !info.isDirectory()) return null
-  }
+  if (mustExist && (await stat(resolved).catch(() => null)) === null) return null
   return resolved
+}
+
+async function requireDirectory(path, options = {}) {
+  const resolved = await requirePath(path, options)
+  if (resolved === null) return null
+  const info = await stat(resolved).catch(() => null)
+  return info?.isDirectory() ? resolved : null
 }
 
 /**
@@ -254,10 +258,10 @@ export function mountRoutes({ ctx, tasks, logger, env = process.env, openDirecto
   disposers.push(register('/pick', async (request, response) => {
     const body = await readJsonBody(request)
     if (typeof body.path === 'string' && body.path !== '') {
-      const directory = await requireDirectory(body.path)
-      if (directory === null) return sendError(response, 400, 'PATH_UNSAFE', '登记的路径必须是存在的绝对目录路径')
-      allowlist.allow(directory)
-      return sendJson(response, 200, { path: directory, via: 'registered' })
+      const selected = await requirePath(body.path)
+      if (selected === null) return sendError(response, 400, 'PATH_UNSAFE', '登记的路径必须是存在的绝对目录或 zip 文件路径')
+      allowlist.allow(selected)
+      return sendJson(response, 200, { path: selected, via: 'registered' })
     }
     const controller = service(ctx, 'directoryPickerController')
     if (controller !== undefined && typeof controller.pick === 'function') {

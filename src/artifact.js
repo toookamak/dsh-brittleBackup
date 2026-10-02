@@ -284,6 +284,14 @@ export async function writeArtifact({
  * @returns {{ok:true,dir:string,source:'dir'|'zip',zip?:string}|{ok:false,code:string,candidates:string[],reason:string}}
  */
 export async function locateArtifact(inputDir, { readDir = listNames, env = process.env, extract = extractArtifactZip } = {}) {
+  // 导入选择器也允许直接选中一个 zip 文件；目录逻辑保持原有兼容性。
+  if (typeof inputDir === 'string' && isArtifactArchiveName(basename(inputDir))) {
+    if (!(await pathExists(inputDir))) return { ok: false, code: 'ARTIFACT_NOT_FOUND', candidates: [], reason: '所选 zip 文件不存在' }
+    const extracted = await extract(inputDir, { env })
+    if (!extracted.ok) return { ok: false, code: extracted.code ?? 'ARCHIVE_INVALID', candidates: [inputDir], reason: `压缩包无法解压：${extracted.reason}` }
+    await pruneExtracted(env, EXTRACTED_KEEP).catch(() => [])
+    return { ok: true, dir: extracted.dir, source: 'zip', zip: inputDir }
+  }
   if (await pathExists(join(inputDir, BACKUP_FILE))) return { ok: true, dir: inputDir, source: 'dir' }
   const children = await readDir(inputDir)
   const found = []

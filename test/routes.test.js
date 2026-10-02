@@ -155,12 +155,18 @@ test('路由：导出目录必须来自选择器白名单（一次性）', async
   assert.equal(reused.statusCode, 403)
 })
 
-test('路由：/pick 拒绝不存在的路径与相对路径', async () => {
+test('路由：/pick 拒绝不存在的路径与相对路径，接受 zip 文件路径', async () => {
   const { call, host } = await setup()
   const missing = await call('/pick', { method: 'POST', headers: ORIGIN, body: { path: join(host.root, 'does-not-exist') } })
   assert.equal(missing.statusCode, 400)
   const relative = await call('/pick', { method: 'POST', headers: ORIGIN, body: { path: 'relative/dir' } })
   assert.equal(relative.statusCode, 400)
+  const zipPath = join(host.root, 'backup.zip')
+  const { writeFile } = await import('node:fs/promises')
+  await writeFile(zipPath, Buffer.from('not-a-real-zip'))
+  const zip = await call('/pick', { method: 'POST', headers: ORIGIN, body: { path: zipPath } })
+  assert.equal(zip.statusCode, 200)
+  assert.equal(JSON.parse(zip.body).path, zipPath)
 })
 
 test('路由：inspect / import 同样要白名单，取消返回状态', async () => {

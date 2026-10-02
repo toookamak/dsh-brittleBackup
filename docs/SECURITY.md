@@ -108,7 +108,7 @@ DSH_BRITTLE_BACKUP_GITHUB_TOKEN__<目标id>
 5. **导出落点 / 导入来源只来自用户显式选择**。实现口径（补齐）：
    - 宿主侧优先：`POST /brittle-backup/pick` 由宿主自己发起选择（`directoryPickerController.pick()`），返回的路径**直接进白名单**；
    - 客户端选择器兜底：页面用 `uiWorkspace.pickDirectory()` 选完，再 `POST /pick { path }` **登记一次**；宿主只接受"存在的绝对目录路径"，登记后**一次性**生效；
-   - `/export` 与 `/inspect` 的 `targetDir` / `sourceDir` 必须命中白名单并**用掉即失效**，否则 `403 PICKER_NOT_ALLOWED`；页面自由构造的路径一律拒绝。
+   - `/export` 与 `/inspect` / `/import` / `/query` 的 `targetDir` / `sourceDir` 必须命中白名单并**用掉即失效**，否则 `403 PICKER_NOT_ALLOWED`；页面自由构造的路径一律拒绝。白名单允许存在的目录或 `.zip` 文件。
 6. **任务状态端点只读**：进度 / 结果查询不得有副作用，也不得回显产物中的敏感字段。
 7. **打开目录单独硬化**：`POST /brittle-backup/open` 只接受存在的绝对目录，仍受 loopback、转发头与同源校验保护；它只调用系统文件管理器，不读取目录内容、不经过 shell、不修改文件。
 8. **配置查询只读且脱敏**：`POST /brittle-backup/query` 只读取②导入来源中的 `backup.json`（目录或 zip 自动定位），来源必须先通过 `/pick` 白名单；输出过滤 API Key、Token、密码、主机名和本机绝对路径。详细模式只展示脱敏结构与配置名，不展示秘密值。

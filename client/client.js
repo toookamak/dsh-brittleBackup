@@ -27,7 +27,7 @@ window.__ModuleLoader__.load({
     var SECTION_ID = 'brittle-backup'
 
     /** 宿主服务句柄（apply 里通过嵌套 inject 填上；页面只读）。 */
-    var host = { pickDirectory: null, hasPicker: false }
+    var host = { pickDirectory: null, pickFile: null, hasPicker: false, hasFilePicker: false }
 
     function request(path, options) {
       var init = { method: 'GET', headers: { accept: 'application/json' } }
@@ -524,6 +524,17 @@ window.__ModuleLoader__.load({
         }).catch(function (error) { setSnapshot(function (p) { return Object.assign({}, p, { error: describeError(error) }) }) })
       }
 
+      function pickZip() {
+        if (!host.pickFile) return
+        host.pickFile().then(function (picked) {
+          if (typeof picked === 'string' && picked !== '') {
+            setDir('import', picked)
+            return request('/pick', { body: { path: picked } }).then(function () { notify('已选定 ZIP 备份：' + picked) })
+          }
+          return undefined
+        }).catch(function (error) { setSnapshot(function (p) { return Object.assign({}, p, { error: describeError(error) }) }) })
+      }
+
       function register(kind) {
         var value = kind === 'export' ? dirs.export : dirs.import
         request('/pick', { body: { path: value } }).then(function (payload) {
@@ -728,7 +739,8 @@ window.__ModuleLoader__.load({
         h('div', { style: styles.card },
           h('div', { style: styles.title }, '② 导入还原'),
           dirPicker('来源', dirs.import, function (value) { setDir('import', value) }, function () { pick('import') }, function () { register('import') }, taskRunning, [
-            { key: 'open', label: '打开备份路径', onClick: function () { openPath('import') }, disabled: !dirs.import, title: '在系统文件管理器里打开来源目录' },
+            { key: 'zip', label: '选择 ZIP…', onClick: pickZip, disabled: !host.hasFilePicker, title: host.hasFilePicker ? '直接选择一个 .zip 备份文件' : '宿主未提供文件选择器，也可手动填写 zip 绝对路径后登记' },
+            { key: 'open', label: '打开备份路径', onClick: function () { openPath('import') }, disabled: !dirs.import, title: '在系统文件管理器里打开来源目录或 zip 所在位置' },
           ]),
           h('div', { style: styles.row },
             h('button', { style: styles.button, disabled: busy || taskRunning || !dirs.import, onClick: runInspect }, '预览（只读）'),
@@ -762,6 +774,12 @@ window.__ModuleLoader__.load({
           if (scoped && scoped.uiWorkspace && typeof scoped.uiWorkspace.pickDirectory === 'function') {
             host.pickDirectory = function () { return scoped.uiWorkspace.pickDirectory() }
             host.hasPicker = true
+          }
+          var workspace = scoped && scoped.uiWorkspace
+          var pickFile = workspace && (workspace.pickFile || workspace.pickFilePath || workspace.pickFilePathname)
+          if (typeof pickFile === 'function') {
+            host.pickFile = function () { return pickFile.call(workspace, { extensions: ['.zip'] }) }
+            host.hasFilePicker = true
           }
         })
       }

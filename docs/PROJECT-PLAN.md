@@ -952,7 +952,7 @@ credentials ──┘                                      │   └─ skills\�
 | POST | `/brittle-backup/open` | `{ path }` | `{ opened, path, via }` | 调起系统文件管理器，不写文件 |
 | POST | `/brittle-backup/query` | `{ sourceDir, detail }` | `{ ok, text, source, zip?, summary }` | 从②导入来源读取 backup.json / zip，生成安全查询文本 |
 | POST | `/brittle-backup/inspect` | `{ sourceDir }` | `{ artifact, checks[14], diff[], plan }` | **无**（只读预览） |
-| POST | `/brittle-backup/pick` | `{ path? }` | `{ path, via: 'host-picker' \| 'registered' }` | 宿主发起选择，或登记一次客户端选择器的返回值 |
+| POST | `/brittle-backup/pick` | `{ path? }` | `{ path, via: 'host-picker' \| 'registered' }` | 宿主发起目录 / zip 选择，或登记一次客户端选择器的返回值 |
 | POST | `/brittle-backup/import` | `{ sourceDir, selection }` | `{ taskId }` | 写 profile 配置 / skills |
 | POST | `/brittle-backup/cancel` | `{ taskId }` | `{ canceled, rolledBack, residuals[] }` | 回滚已写入项 |
 
@@ -982,7 +982,7 @@ window.__ModuleLoader__.load({ id: '<npm 包名>', factory: (require) => { /* �
   ))
   ```
   `id` 必须自用（复用已存在 id 会顶掉那一页）；当前占用 id：`account`、`general`、`models`、`plugins`、`agency-agents`、`skills-manager`、`agent-presets`、`market`、`better-sidebar`。
-- **目录选择**：客户端 `uiWorkspace.pickDirectory()`（用嵌套 `inject(['uiWorkspace'])` 取，缺失就退化为"把绝对路径登记进来"）。
+- **导入来源选择**：客户端 `uiWorkspace.pickDirectory()` 选择目录；若宿主提供 `pickFile` / `pickFilePath`，额外提供「选择 ZIP…」直接选择压缩包；两者都缺失时退化为手动登记绝对目录或 zip 文件路径。
 - 页面**只**通过 §17.2 的路由与宿主通信，不直接操作文件系统；不注册工具、不注册聊天命令（U24 / D4）。
 - 页面结构（U1 / U3 / U4）：一个设置页内三个功能区 —— ① 导出（7 个勾选项，含默认开启的 zip 压缩 + 落点复用 / 打开按钮）、② 导入（来源 → 人话摘要 → 可展开的完整 14 项验证表 + 备份配置查询 / 复制 + 逐项勾选 + `allowBuilds` 显式确认 → 开始导入）、③ 任务进度（阶段 / 百分比进度条 / 彩色成功失败结果 / 警告 / 取消）；备份配置查询（从②导入来源读取 backup.json 或 zip，生成安全摘要 / 脱敏详细结构 / 预览 / 复制 / 下载）。
 
