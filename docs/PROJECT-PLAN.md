@@ -4,8 +4,8 @@
 |---|---|
 | 项目名 | `dsh-BrittleBackup`（仓库 / 展示名） |
 | npm 包名 | `dsh-brittlebackup`（npm 新包名必须全小写，见下方命名约定） |
-| 文档版本 | v3（**阶段一：仅本地导出 / 导入**，见 §0.0 与 [SCOPE-PHASE1.md](SCOPE-PHASE1.md)） |
-| 编写日期 | 2026-10-01（2026-10-02 重新冻结范围） |
+| 文档版本 | v4（**阶段一：仅本地导出 / 导入**；2026-10-02 第二次修订补齐实现契约，见 §17） |
+| 编写日期 | 2026-10-01（2026-10-02 重新冻结范围；同日第二次修订补齐实现契约） |
 | 基线环境 | DSH Desktop，profile `desktop`，host 版本 `0.2.0-rc.2`，Windows 11；**宿主运行时 Node 24.21.0 / pnpm 11.7.0**（实测 `resources\runtime\primary-runtime\runtime.json`；系统 `node` v22.23.1 不是宿主运行时，勿混用） |
 | 状态 | **阶段一范围已冻结（2026-10-02，见 §0.0 与 [SCOPE-PHASE1.md](SCOPE-PHASE1.md)）**：仅本地导出与导入还原、仅中文 |
 | 一句话定位 | DSH 的**配置 / 插件 / 模型配置**本地导出与导入还原插件，附带一份"兼容性全炸也能照着重配"的兜底文档（远端传输与一键重启为**阶段二**，见 §0.0） |
@@ -20,7 +20,7 @@
 | npm 包名 | `dsh-brittlebackup` | npm 对**新包**强制全小写，不能直接叫 `dsh-BrittleBackup` |
 | loader entry id | `brittle-backup`（UI 半用 `brittle-backup-ui`） | cordis 对重复 entry id 是整棵树起不来，必须独占前缀（实测 `duplicate loader entry id` 字符串存在于 dsh-market 的 7 个文件里） |
 | 设置命名空间 | **与 loader entry id 相同 = `brittle-backup`** | 实测 `settings` 服务的 `update` / `replace` / `mutate` 的 `ns` 参数语义就是 "Profile entry id"，`describe()` 也按 entry id 索引；**另起一个名字会指向不存在的条目**（原稿此处写 `dsh-brittle-backup`，与本表 entry id 自相矛盾，已纠正） |
-| 本地产物目录 | `<DSH_HOME>\dsh-brittle-backup\` | 与 profile 目录同级的用户数据目录 |
+| 插件工作目录（快照 / temp） | `<DSH_HOME>\dsh-brittle-backup\` | 与 profile 目录同级的用户数据目录；**不是导出落点**（导出落点由用户自选，U31） |
 | 产物形态 | **一个目录**：`dsh-brittle-backup-<YYYYMMDD-HHmmss>\`，内含 `backup.json` + `兜底文档.md` +（勾选时）`skills\` | 阶段一为本地目录，无 zip、无体积硬上限（U30）；`latest.json` 与 skills zip 属阶段二 |
 | 产物 `format` 字段 | `dsh-brittle-backup` | 与 `version` 共同构成对外契约 |
 | 凭据 ref 名 | **阶段二**：基础名 `DSH_BRITTLE_BACKUP_GITHUB_TOKEN` / `DSH_BRITTLE_BACKUP_WEBDAV_PASSWORD`，按目标派生（如 `…_WEBDAV_PASSWORD__<目标id>`） | 阶段一为本地模式，**不需要任何凭据**；保留本行以免将来重命名 |
@@ -46,6 +46,7 @@
 | **本期撤销 / 后置** | U6 界面双语、U7/U8 一键重启、U9 凭据录入、U12 多目标、U15 凭据按目标派生、U22 文档语言设置、U23 / D2 / D3 历史与保留（导出文件由用户自行管理）、U25 中"导出后台跑"的部分、U26–U29 远端历史与清理、`D1`（语言设置） |
 | **本期收窄** | U10 恢复入口 → **只从本地目录**（不再支持 WebDAV 下载与剪贴板粘贴）、U16 → **一份产物导出到用户自选目录**、U17 → skills 文件**以 `skills/` 子目录随导出目录一起走**（不再是 zip 附件） |
 | **本期新增** | **U30** 导出形态 = 一个**目录**（`backup.json` + `兜底文档.md` + `skills/`）；**U31** 导出落点 = **用户自选目录**，插件不维护导出历史；**U32** profile 配置读写**走官方 `settings` / `configEditor` 服务**（结构化，放弃"保留注释与行形式"）；**U33** 导入后仍用 `credentials.describe()` 查"本机缺哪个 key" |
+| **本期新增（第二次修订）** | **U34** 三处受限 `node:fs` 例外（快照目录 / 用户选定导出目录 / `<DSH_HOME>\skills`）；**U35** 导入可取消（取消 = 回滚）；**U36** 产物补 `enabled` 与 `producer.hostname`，`entries[]` 只收 override 非空条目，账号名不采集；**U37** 安装类写入（`package.json` / `pnpm-lock.yaml` / bundle 启停）由 `pluginManager` 独占。明细见 [SCOPE-PHASE1.md](SCOPE-PHASE1.md) §3 与本文 §17 |
 | **本期保留不变** | U1–U5（设置页 / 自包含可分享文档）、U11（skills 可勾选，落地为目录）、U13 场景、U14 环境差异对照、U18–U21（**含 §7 全 14 项兼容性验证**、合并写入、快照回滚、agent 忙碌拒绝）、U24（Agent 不可触发） |
 
 **U32 的代价与后果（必须记录）**：
@@ -106,7 +107,7 @@
 | D3 | 历史默认保留最近 **10** 份（可改） | U23 |
 | D4 | 插件**不向模型注册任何工具**，也不提供聊天命令入口（与 U1"只有设置页"、U24 一致） | U24 + U1 |
 | D5 | 任务状态由**宿主侧持有**；重开设置页能看到进行中 / 已完成结果；**中途重启 DSH 会中断任务，不承诺续跑** | U25 |
-| D6 | 必须提供**取消**；且「取消恢复」= 回滚到操作前 | U25 + U21 |
+| D6 | 必须提供**取消**（**本期保留**，落为 U35）；且「取消恢复」= 回滚到操作前 | U25 + U21 |
 | D7 | 每个 WebDAV 目标各自带"允许局域网 / 私有地址"开关（双模式按目标落地） | U12 |
 
 ### 0.5 按建议生效（未收到异议）
@@ -165,13 +166,18 @@
 | §2.1 G4 / §2.3 S3 | 传输层支持 GitHub 与 WebDAV；公网 / 局域网 WebDAV 演练 |
 | §4.1 传输行 / §4.3 版本路线 | WebDAV、GitHub 后端、远端历史 |
 | §5.3 | 上传策略与 `.latest.json` |
-| §6.1 步骤 ⑥ / §6.3 / §6.4 | 上传、多目标汇报、WebDAV 双模式、GitHub 后端 |
+| §6.3 / §6.4 | 多目标汇报、WebDAV 双模式、GitHub 后端 |
 | §6.6 | 一键立即重启 |
 | §9 威胁 2–3 与威胁 8 / §10 网络项 | 出站 SSRF、远端删除、上传失败与服务商差异 |
-| §11 / §12 M4–M5 / §13 R8 / §14 | mock WebDAV、重启演练、公网 / 局域网 WebDAV 验收 |
+| §13 R8 | 第三方服务商限制（WebDAV 路径 / 重定向 / 根目录） |
 | §16 Q3 与 §0.7 | 远端历史与清理 |
+| §5.1（**整节作废**） | 早期 JSON 草案（单文件、`files[].lines`、内嵌 `doc.content`、zip 附件、上传语义）—— 产物 schema 以 [FORMAT.md](FORMAT.md) 为唯一权威 |
+| §6.1 ④ | "本地落盘 `<DSH_HOME>\dsh-brittle-backup\`" —— 本期落盘到**用户自选目录**（U31），内部目录只存快照与临时文件 |
+| §10 其余行 | "体积超限 → 拒绝上传"等表述已随 U31 改写为"明确报错，不静默截断" |
+| §12 | M6 / M7 为阶段二；本期里程碑 **M0–M5** 见 §12 与 §17.6 |
+| §14 | 已整体改写为阶段一验收清单 |
 
-**阶段一已对齐的部分**：§0.0–§0.8（本节）、§4.1 skills 行、§5.1–§5.2 产物形态（见 [FORMAT.md](FORMAT.md)）、§7（14 项检查**全部适用**）、§8.1–§8.4。
+**阶段一已对齐的部分**：§0.0–§0.8（本节）、§4.1（配置读写行；`package.json` 写回归属见 U37）、§4.2、§5.2（兜底文档模板与语言规则；产物字段以 [FORMAT.md](FORMAT.md) 为准）、§6.1–§6.2、§6.5、§7（14 项检查**全部适用**）、§8.1–§8.5（文件操作例外见 §17.4）、§10、§11、§12（M0–M5）、§14、§17。
 
 ---
 
@@ -295,19 +301,25 @@ C:\Users\Maxxie\.dsh\                     ← DSH_HOME（由 DSH_HOME 环境变�
 
 模型配置里的 `apiKeyEnv`（例：`MPLAN_API_KEY`、`XIUXIAN_API_KEY`）就是指向这些 ref 的指针。因此"备份模型不含 key"的正确实现是：**备份配置条目 + 记录所需 ref 名单**，恢复后提示"缺哪个"，由用户在设置里补。
 
-### 3.4 可用的公开服务（来自本机运行时只读内省）
+### 3.4 可用的公开服务（2026-10-02 重新内省；签名以下表为准）
 
-| Service | 本项目用到的成员 | 用途 |
+> 所有服务的访问契约都是 **optional**（`ctx.get('x')` + `typeof service?.method === 'function'` 探测）；下表的"必需"指**功能必需**，不是加载硬依赖。
+
+| Service | 本项目用到的成员（实测签名） | 用途 |
 |---|---|---|
-| `pluginManager` | `installBundle(spec, options?)`、`waitForInstall(requestId)`、`cancelInstall(requestId)`、`listPlugins()`、`listBundles()`、`removeBundle(name)`、`setBundleEnabled(name, enabled)`、`setPluginEnabled(id, enabled)` | 恢复时重装插件、读取当前插件/包信息 |
-| `credentials` | `describe(ref)`、`listRecords()`、`describeRecord(key)` | 生成"缺哪些 key"清单（**不读值**） |
-| `skills` | `list(options?)`、`snapshot(options?)`、`get(name, options?)` | 取 skill 名称/描述（文件本体需走 fs） |
-| `settings` | `describe()`、`update(ns, patch)`、`replace(ns, section)`、`mutate(ns, ops)` | 存放本插件自己的配置（含目标地址、开关状态） |
-| `webServer` | `register(route)` | 注册本机 HTTP 路由（与客户端 UI 通信） |
-| `configEditor` | `entries()`、`configuration()`、`edit(entry, change)` | **可选**：以"官方编辑路径"读写 `cordis.patch.yml` 条目，比直接写文件更抗升级 |
+| `pluginManager` | `listPlugins()`、`listBundles()`、`installBundle(spec, { enabled?, requestId?, approvedBuilds?, registry? })`、`waitForInstall(requestId)`、`cancelInstall(requestId)`、`removeBundle(name)`、`setBundleEnabled(name, enabled)`、`setPluginEnabled(id, enabled)`、`inspect(spec)` | 恢复时安装插件、对齐**启用状态**、读取当前插件/包信息。**它独占 `package.json` / `pnpm-lock.yaml` 的写入**（U37） |
+| `credentials` | `describe(ref)`、`describeRecord(key)`、`listRecords()` | 生成"缺哪些 key"清单（**不读值**，U33） |
+| `skills` | `list(options?)`、`snapshot(options?)`、`get(name, options?)` | 取 skill 名称/描述（文件本体走 §17.4 的受限 `node:fs`） |
+| `settings` | `describe(options?)`（**同步**，返回 `SettingsDescriptor[]`，含 `secrets?: { path: string[]; set: boolean }[]`）、`update/replace/mutate(ns, …, expectedRevision?)` | 脱敏的权威依据 + 存放本插件自己的配置（`ns` = profile entry id = `brittle-backup`） |
+| `webServer` | `register(route)` | 注册本机 HTTP 路由（与客户端 UI 通信；接口契约见 §17.2） |
+| `configEditor` | `entries()`、`configuration(): Array<{ entry, inherited, override }>`、`edit(entry, change)` | 以"官方编辑路径"读写 profile 配置条目。**功能必需**：缺失时配置条目不自动还原（§4.2） |
+| `agents` | `list()` | agent 忙碌闸门：判定 `agent.status === 'running'`，服务缺失 / 状态未知 fail-open（§17.5） |
+| `fs` | `resolve`/`stat`/`lstat`/`readText`/`streamText`/`readBytes`/`listDir`/`writeText`/`editText` 等 | 读文本与目录列举。**没有删除、没有建目录、没有写二进制** —— 目录树复制、快照与回滚因此走受限 `node:fs`（§17.4） |
+| `directoryPicker` / `directoryPickerController` / 客户端 `uiWorkspace` | `directoryPicker.capability()`；`directoryPickerController.pick()`（Remote）；客户端 `uiWorkspace.pickDirectory()` | 导出落点与导入来源的目录选择。注意：**`directoryPicker` 本身不能发起选择**，它只有 `capability()` |
+| `slots`（客户端） | `register` / `registerFactory` / `inject` | 注册顶层设置页 `settings.section`（注册参数 `{ id, order, label }`，见 §17.3） |
 | `storageDomain` | `open(spec)`、`get(name)` | **可选**：需要结构化持久化时的备选 |
 
-> 注：`pluginManager` 是官方插件管理能力的服务形态，用它重装插件比 spawn `dsh plugin add` 更稳（本机 `dsh` **不在 PATH** 上，桌面版由宿主启动，外部进程方案天然脆弱）。
+> 注：`pluginManager` 是官方插件管理能力的服务形态，用它装插件比 spawn `dsh plugin add` 更稳（本机 `dsh` **不在 PATH** 上，桌面版由宿主启动，外部进程方案天然脆弱）。
 
 ### 3.5 环境事实
 
@@ -322,19 +334,23 @@ C:\Users\Maxxie\.dsh\                     ← DSH_HOME（由 DSH_HOME 环境变�
 
 ## 4. 产品边界
 
-### 4.1 v1 范围
+### 4.1 阶段一范围
 
-| 分类 | v1 包含 | 说明 |
+> 本表已按 [SCOPE-PHASE1.md](SCOPE-PHASE1.md) 的阶段一范围重写；带 🔜 的行属**阶段二**，本期不实现。产物字段以 [FORMAT.md](FORMAT.md) 为准。
+
+| 分类 | 阶段一包含 | 说明 |
 |---|---|---|
-| profile 配置 | `package.json`、`cordis.patch.yml`、`pnpm-workspace.yaml` | 保留行形式（含注释/顺序），**强制密钥剥离** |
-| 插件清单 | name / spec / 实际版本 / 来源类型 / commit / 一句话用途 | 不搬运 `node_modules` |
+| profile 配置 | `cordis.patch.yml` **结构化条目**（只收录有 override 的 patch 目标条目）、`package.json`、`pnpm-workspace.yaml` 原文 | **放弃注释与行顺序**（U32）；密钥强制剥离；`package.json` **只读采集**，写入由 `pluginManager` 独占（U37） |
+| 插件清单 | name / spec / 实际版本 / 来源类型 / commit / **enabled** / 一句话用途 / `unportable` | 不搬运 `node_modules`；`enabled` 让"已装但被禁用"能被还原（U36） |
 | 模型配置 | provider（key、displayName、api、baseURL、apiKeyEnv）+ models[] + 默认模型 | 无任何密钥值 |
-| skills | 默认**仅名字 + 描述 + 路径**；用户可勾选"连文件一起" | 文件走**独立 `.zip` 附件**，仅本地 / WebDAV 支持；GitHub 因限额不支持（见 §0 的 U11 / U17） |
-| 兜底文档 | Markdown，含插件表、provider 表与可粘贴 YAML、模型表、skill 名、手工重建步骤 | 与 JSON 同源同版本 |
-| 传输 | GitHub（Gist 优先）、WebDAV（公网硬化 + 显式私有目标模式）；**目标数量不限、可多目标并行** | 见 §6.3 / §6.4 与 §0 的 U12 / U16 |
-| 恢复 | 预览 diff、逐项勾选、兼容性闸门、环境差异对照、合并应用、缺 key 提示、**一键立即重启**、失败回滚 | 见 §6.2 / §6.6 / §7 |
-| 本地能力 | 导出到本地文件、从本地文件导入、恢复前自动快照 | 保证离线可用 |
-| 历史与保留 | 历史列表、可设保留上限并自动清理、支持手动删除、每份可一键进入恢复向导 | 见 §0 的 U23 / D2 / D3 |
+| skills | 默认**仅名字 + 描述 + 路径**；用户可勾选"连文件一起" | 文件落地为导出目录下的 `skills\` **子目录**（逐字节，含子目录与二进制文件），不再是 zip（U17 收窄） |
+| 兜底文档 | Markdown，含插件表、provider 表与可粘贴 YAML、模型表、skill 名、手工重建步骤 | 与 JSON 同源同版本；零主机名 / 零本机路径 |
+| 恢复 | 预览 diff、逐项勾选、兼容性闸门（§7 全 14 项）、环境差异对照、合并应用、缺 key 提示、**取消 = 回滚**、失败回滚 | 见 §6.2 / §7；入口只有本地目录（U10 收窄），新增 U35 |
+| 本地能力 | 导出到用户自选目录、从本地目录导入、导入前自动快照 | 保证离线可用；不维护导出历史（U31） |
+| 文件操作 | 三处受限 `node:fs` 例外（快照目录 / 用户选定导出目录 / `<DSH_HOME>\skills`） | 宿主 `fs` 服务缺删除 / 建目录 / 写二进制，见 §17.4（U34） |
+| 🔜 传输 | GitHub（Gist 优先）、WebDAV（公网硬化 + 显式私有目标模式）、多目标 | 阶段二；见 §6.3 / §6.4 |
+| 🔜 重启 | 一键立即重启 | 阶段二；本期导入完成后只提示"需要重启 DSH 生效" |
+| 🔜 历史与保留 | 历史列表、保留上限、手动删除、一键进入恢复向导 | 阶段二；本期导出文件由用户自行管理 |
 
 ### 4.2 明确排除（v1）
 
@@ -355,7 +371,9 @@ C:\Users\Maxxie\.dsh\                     ← DSH_HOME（由 DSH_HOME 环境变�
 
 ## 5. 备份产物
 
-### 5.1 JSON 主体（权威产物）
+### 5.1 JSON 主体（🔴 本节已作废，仅作历史记录）
+
+> **产物 schema 的唯一权威是 [FORMAT.md](FORMAT.md)。** 本节以下的 JSON 草案（单文件 `.json`、`items.profile.files[].lines`、内嵌 `doc.content`、zip 附件、WebDAV/GitHub 上传语义）**已随阶段一作废**：实现、测试与验收一律以 [FORMAT.md](FORMAT.md) §2 为准，冲突时以它为准。保留本节只为记录设计演进。
 
 文件建议名：`dsh-brittle-backup-<YYYYMMDD-HHmmss>.json`。**WebDAV 与 GitHub 私有仓库目标按时间戳逐份上传，以保留历史**（U26）；`dsh-brittle-backup.latest.json` 只用于**覆盖式后端（Gist）**与"最新指针"语义。
 
@@ -401,9 +419,9 @@ C:\Users\Maxxie\.dsh\                     ← DSH_HOME（由 DSH_HOME 环境变�
 }
 ```
 
-约束：
+约束（**旧草案的下限口径已作废**，数值以 [FORMAT.md](FORMAT.md) §7 的"宽松防爆"表为准）：
 
-- 上限：JSON ≤ 2 MiB（沿用 dsh-market 的额度，文档内嵌后仍有余量）；文件数 ≤ 256。**skills 文件不在 JSON 内**，走独立 `.zip` 附件（U17）：附件超限时**只跳过附件并保留 JSON**，不整体失败；JSON 本身超限才拒绝上传并提示关闭部分项。
+- 🔴 已作废：以下三条按旧草案（单文件 + zip 附件 + 上传）写；阶段一的产物是**一个目录**（U30），skills 文件是 `skills\` 子目录、没有 zip、没有上传。
 - 所有 `path` 必须是相对路径、禁止 `..`、禁止命中排除名单（逐条校验，写前与读后各校验一次）。
 - `redactions[]` 是**必填字段**（可为空数组）：它让恢复侧能精确提示"哪一项需要重新填 key"。
 
@@ -473,7 +491,7 @@ provider `deepseek-account` / model `deepseek-flash` / reasoningEffort `high`
 |---|---|---|---|
 | example-skill | … | `<DSH_HOME>\skills\example-skill` | 否（仅清单） |
 
-> skills 文件**不在本文件里**。若备份时勾选了"连文件一起"，文件在同目录的 `…-skills.zip` 附件中（仅本地 / WebDAV 目标存在该附件）。
+> skills 文件**不在本文件里**。若备份时勾选了"连文件一起"，文件在同目录的 `skills\` 子目录中（阶段一形态，U17 收窄）。
 > 本文件**刻意不含配置原文**（U5）：只给可粘贴的片段与步骤，以便安全地单独分享。
 ```
 
@@ -485,7 +503,9 @@ provider `deepseek-account` / model `deepseek-flash` / reasoningEffort `high`
 - **文档语言**按用户设置输出（中 / 英 / 双语，默认跟随界面）；选双语时**同一份文档内中英对照**，不出两个文件（U22 / D1）。
 - 文档**不得包含**：任何密钥值、任何主机名 / 地址 / 账号名、任何配置原文（U5 / U20）。这是"可以安全单独分享"的前提。
 
-### 5.3 命名与版本策略
+### 5.3 命名与版本策略 🔜 阶段二
+
+> 本节描述上传 / 覆盖式后端 / 附件命名，**本期不适用**（本期产物形态见 [FORMAT.md](FORMAT.md) §1）。
 
 - 产物格式版本 `version` 独立于插件版本；恢复侧只接受 `version === 1`（未来接受 `<= 当前支持` 并提供"仅预览"）。
 - 文件名带时间戳用于留存历史；`*.latest.json` 用于覆盖式上传（WebDAV 单一目标场景）。
@@ -498,45 +518,52 @@ provider `deepseek-account` / model `deepseek-flash` / reasoningEffort `high`
 ### 6.1 备份流程
 
 ```
-① 选择内容（默认全选：profile 配置 / 插件清单 / 模型配置 / skills 清单 / 兜底文档）
-② 采集（逐项 try/catch，缺失记 absent，不中断）
-③ 剥离密钥（对 profile 文件做结构化扫描与替换）
-④ 生成 JSON + 文档，本地落盘（<DSH_HOME>\dsh-brittle-backup\）
-⑤ 密钥自查扫描：命中即拦截上传，除非用户显式勾选"我已确认该值可外传"
-⑥ 上传（GitHub / WebDAV / 仅本地）
-⑦ 报告：产物路径、体积、被剥离项数量、上传结果、文档路径
+① 选择内容（默认：profile 配置 / 插件清单 / 模型配置 / skills 清单 / 兜底文档；skills 文件默认关）
+② 选择落点（系统目录选择器 → 本次返回值写入宿主白名单，U31 / §17.2）
+③ 采集（逐项 try/catch，缺失记 absent，不中断）
+④ 剥离密钥（结构化扫描 + 替换，记录 redactions[]）
+⑤ 生成 backup.json + 兜底文档（+ 勾选时的 skills\），用受限 node:fs 原子落盘到用户目录
+⑥ 密钥自查扫描：命中即拦截整次导出并提示命中位置
+⑦ 报告：产物目录、体积、被剥离项数量、文档路径、警告条目
 ```
 
-- 采集阶段的每一次失败都必须转化为"结果里的一个警告条目"，不允许整次备份失败（唯一的硬失败：无法读取 `package.json`，因为那是恢复的最低要求）。
-- 上传失败不删除本地产物，且明确提示本地产物路径。
+- 采集阶段的每一次失败都必须转化为"结果里的一个警告条目"，不允许整次导出失败（唯一的硬失败：无法读取 `package.json`，因为那是恢复的最低要求）。
+- **本期没有上传步骤**（远端属阶段二）；导出只写用户自选目录与插件内部工作目录。
+- 目标目录重名时派生 `-2`、`-3` 后缀，绝不覆盖既有数据。
 
 ### 6.2 恢复流程
 
 ```
-① 取得备份（下载 / 本地文件 / 剪贴板粘贴）
-② 严格校验（format/version/路径安全/文件数/体积）→ 失败即止，不写任何文件
-③ 只读预览：逐项 diff（新增 / 覆盖 / 删除 / 跳过 / 无法自动恢复）
+① 取得备份（本期只有一种：本地目录 / 目录内的 backup.json；来源规则见 §17.5）
+② 严格校验（format/version/路径安全/条目数/体积）→ 失败即止，不写任何文件
+③ 只读预览：逐项 diff（新增 / 覆盖 / 跳过 / 无法自动恢复）
    每项标注：✅ 可自动恢复 ｜ ⚠️ 可恢复但有风险 ｜ ❌ 只能照文档手工做
 ④ 用户逐项勾选
 ⑤ 应用：
    a. 写前自动快照（本插件自己的快照目录，独立于 .dsh-market）
-   b. profile 文件：合并语义写入（temp + rename，原子）
-   c. 插件：pluginManager.installBundle(spec) 逐项安装，逐项汇报；失败项不影响其他项
-   d. skills：v1 只做"清单核对"，不写文件
-   e. 缺 key 清单：credentials.describe(ref)
+   b. profile 配置条目：configEditor.edit(entry, change) 按 patch 目标 id 合并（U32 / U36）
+   c. package.json / pnpm-workspace.yaml：只读比对；`allowBuilds` 需展示 diff 并显式确认
+   d. 插件：已装 → setBundleEnabled / setPluginEnabled 对齐启用状态；缺失 → installBundle(spec, { enabled }) 逐项安装；失败项不影响其他项
+   e. skills：勾选了文件附件才写 `<DSH_HOME>\skills\<name>\`（逐字节，含子目录与二进制）；否则只做清单核对
+   f. 缺 key 清单：credentials.describe(ref)
 ⑥ 汇总报告：成功项 / 失败项 / 需手工项 / 需要补的 key / 是否需要重启
-⑦ 出错时整体回滚到快照；回滚不完整必须显式报告（写明残留文件）
+⑦ 出错或用户取消 → 回滚到快照；回滚不完整必须显式报告（写明残留文件）
 ```
 
 硬性规则：
 
-- **合并语义**：备份里没有的插件、配置条目一律不删。
-- **有 agent 运行时拒绝写 profile**，提示"请等当前会话空闲或稍后重试"。
-- **恢复后必须明确告知"需要重启 DSH 才能生效"**（本机 dsh-market 的日志与配置说明都表明 profile 变更是重启/热加载级别的事，不能假装即时生效）。
+- **合并语义**：备份里没有的插件、配置条目一律不删；`absent[]` 不是删除指令。
+- **有 agent 运行时拒绝写 profile**：判定为 `agents.list()` 中存在 `agent.status === 'running'`；服务缺失或状态未知时 **fail-open**（只记一次 warn，不阻断）。
+- **可取消**（U35 / `D6`）：取消 = 停止剩余项 + 回滚已写入项；正在进行的安装调 `pluginManager.cancelInstall(requestId)`，返回 `too-late` 时必须在报告里说明该项可能已生效。
+- **①–⑤ 之前全程只读**：校验与预览不产生任何写操作。
+- **恢复后必须明确告知"需要重启 DSH 才能生效"**（本机 dsh-market 的日志与配置说明都表明 profile 变更是重启/热加载级别的事，不能假装即时生效）；一键重启属阶段二（U7 后置）。
 - 目标文件若存在且其实是目录/符号链接 → 拒绝该项，不越权删除。
 - 不写 `cordis.yml`、不写 `node_modules`、不写 `.credentials.yaml`。
+- 目录树复制、快照与回滚所需的删除 / 建目录 / 写二进制走受限 `node:fs`（§17.4 / U34）。
 
-### 6.3 WebDAV 双模式
+### 6.3 WebDAV 双模式 🔜 阶段二
+
+> **本期不做网络传输**，本节保留以备阶段二（安全细则同样见 [SECURITY.md](SECURITY.md) §3）。
 
 | 模式 | 放行 | 仍然拒绝 | 默认 |
 |---|---|---|---|
@@ -551,7 +578,9 @@ provider `deepseek-account` / model `deepseek-flash` / reasoningEffort `high`
 - 单请求超时 30 s；响应体上限：GET 2 MiB，其他 64 KiB。
 - 凭据：URL、用户名、"是否私有目标"开关存在本插件设置里（设置命名空间 = loader entry id `brittle-backup`，见命名约定表）；**密码走凭据服务，按目标派生 ref 名**（如 `DSH_BRITTLE_BACKUP_WEBDAV_PASSWORD__<目标id>`，见 U15——原稿写的单一固定 ref 名无法同时保存多目标密码，已纠正）。密码**永不回显、永不写入备份产物**；URL / 用户名属连接元数据，会随 `cordis.patch.yml` 进入备份 JSON（U20），但**不进入可分享文档**（U5）。
 
-### 6.4 GitHub 后端
+### 6.4 GitHub 后端 🔜 阶段二
+
+> **本期不做网络传输**，本节保留以备阶段二。
 
 | 后端 | v1 | 说明 |
 |---|---|---|
@@ -574,7 +603,9 @@ provider `deepseek-account` / model `deepseek-flash` / reasoningEffort `high`
 
 绝不尝试读取、显示、传输任何密钥值。
 
-### 6.6 重启语义
+### 6.6 重启语义 🔜 阶段二
+
+> **本期只提示"需要重启 DSH 生效"**（见 §6.2 硬性规则与 [SCOPE-PHASE1.md](SCOPE-PHASE1.md) §2.3）；一键立即重启属阶段二。
 
 恢复完成后提示"配置已写入，需要重启 DSH 生效"，并提供「**一键立即重启**」按钮（U7 / U8）。
 
@@ -617,43 +648,51 @@ provider `deepseek-account` / model `deepseek-flash` / reasoningEffort `high`
 - 分发形态：DSH 社区插件（npm 包 `dsh-brittlebackup`，仓库名 `dsh-BrittleBackup`），`dsh.bundle.patch` 指向自带 patch；**必须声明 `dsh.client`**。自带的 patch 使用独占 entry id 前缀 `brittle-backup`。
 - **不向模型注册任何工具**，也不提供聊天命令入口（U24 / D4）。
 
-### 8.2 建议目录结构
+### 8.2 目录结构（已实现；2026-10-02 更新）
+
+> **与早期草案的差异**：源码是**纯 ESM JavaScript**（`src/*.js`），没有 TypeScript、没有构建步骤 —— 这台机器的 profile `node_modules` 里没有 `typescript` / `tsdown`，而"零依赖、零构建"同时服务了"抗升级"与"离线可跑"两个目标。原草案的 `*.ts` 文件名只在语义上对应（见下表）。
+> 插件自身设置也**不写 profile 配置**，落在 `<DSH_HOME>\dsh-brittle-backup\settings.json`（理由见 §17.1）。
 
 ```
 dsh-BrittleBackup/                 ← 仓库根（npm 包名 dsh-brittlebackup）
-├─ package.json                 # name/version/dsh.bundle/dsh.client/peerDependencies
-├─ cordis.patch.yml             # 本插件插进 profile 的 loader 条目
-├─ README.md
-├─ LICENSE                      # MIT
-├─ docs/
-│   ├─ PROJECT-PLAN.md          # 本文件
-│   ├─ SCOPE-PHASE1.md          # 阶段一（本地导出 / 导入）权威范围
-│   ├─ FORMAT.md                # 备份产物格式说明（对外契约）
-│   └─ SECURITY.md              # 密钥与传输安全策略
+├─ package.json                 # name/version/dsh.bundle/peerDependencies（零 dependencies）
+├─ cordis.patch.yml             # 本插件插进 profile 的 loader 条目（insert: id = brittle-backup）
+├─ README.md  LICENSE  .gitignore
+├─ docs/                        # 本文件 / SCOPE-PHASE1 / FORMAT / SECURITY
+├─ scripts/
+│   └─ selfcheck.mjs            # 语法自检 + "无网络代码 / 不碰 .credentials.yaml" 断言
 ├─ src/
-│   ├─ index.ts                 # 插件入口：注册服务/路由/配置 schema
-│   ├─ config.ts                # Config schema（schemastery/zod），含 version
+│   ├─ index.js                 # 插件入口：export name + apply（只挂路由，不做别的）
+│   ├─ routes.js                # 本机 HTTP 路由 + loopback / 转发头 / 同源 / 选择器白名单
+│   ├─ paths.js                 # 路径与命名常量、包含关系守卫、产物路径合法性
+│   ├─ log.js                   # 日志（必先脱敏；宿主 logger 缺失则 console）
+│   ├─ nodefs.js                # 受限 node:fs 原语（原子写 / 目录树复制 / 删除 / 列举）
+│   ├─ services.js              # 服务探测与降级（ctx.get + 方法存在性）
+│   ├─ settings.js              # 自身设置（工作目录 settings.json）
+│   ├─ task.js                  # 任务状态（宿主侧内存）+ 单任务闸门 + 取消
+│   ├─ redact.js                # 三道防线：密钥路径图 / 字段名剥离 / 正则自查
+│   ├─ doc.js                   # 兜底文档生成器（中文，自包含可分享）
+│   ├─ artifact.js              # 产物组装、严格校验、落盘、读取与定位
+│   ├─ export.js                # 导出编排：采集 → 剥离 → 自查 → 文档 → 落盘 → 报告
+│   ├─ credentials.js           # 凭据状态（只问有没有，永不读值）
+│   ├─ semver.js                # peerDependencies 判定（含 prerelease 语义）
+│   ├─ diff.js                  # 结构化 diff / 深度合并
 │   ├─ collect/
-│   │   ├─ profile.ts           # 读结构化配置条目 + 两个文件（容忍缺失、记录 absent）
-│   │   ├─ plugins.ts           # 清单 + 实际版本 + lock commit + unportable 检测
-│   │   ├─ models.ts            # 从结构化配置派生 provider / models / 默认模型
-│   │   └─ skills.ts            # skills.list + 目录扫描（元数据 + 可选文件复制）
-│   ├─ redact.ts                # 脱敏：settings 密钥路径图 + 字段名 + 正则自查
-│   ├─ doc.ts                   # 兜底文档生成器（中文，自包含可分享）
-│   ├─ artifact.ts              # 产物组装、校验、原子落盘（目录形态）
-│   ├─ export.ts                # 本地导出：目录选择 + 逐项勾选 + 写盘
-│   ├─ restore/
-│   │   ├─ validate.ts          # 产物严格校验（路径安全等）
-│   │   ├─ plan.ts              # 生成导入计划（逐项/级别/原因）
-│   │   ├─ checks.ts            # §7 的全部 14 项检查
-│   │   ├─ apply.ts             # 按条目 id 合并写入、逐插件安装编排
-│   │   └─ snapshot.ts          # 自有快照与回滚
-│   └─ routes.ts                # 本机 HTTP 路由（同源 loopback 校验）
-├─ client/                      # 设置页 UI（settings.section，仅中文）
-├─ test/
-│   ├─ unit/                    # redact / plan / checks / artifact / config-merge
-│   └─ fixtures/                # 样例 profile、样例导出目录
-└─ 🔜 阶段二新增：src/transport/（webdav.ts、gist.ts）、src/restart.ts、src/recovery.ts
+│   │   ├─ index.js             # 采集总编排（逐项 try/catch，唯一硬失败 = package.json）
+│   │   ├─ profile.js           # 结构化配置条目 + package.json / pnpm-workspace.yaml
+│   │   ├─ plugins.js           # 清单 + 版本 + lock commit + enabled + unportable
+│   │   ├─ models.js            # 从结构化配置派生 provider / models / 默认模型
+│   │   └─ skills.js            # skills.list + 目录扫描（元数据与文件数）
+│   └─ restore/
+│       ├─ import.js            # 导入编排：预览（只读）→ 拦截判定 → 应用
+│       ├─ host.js              # 宿主现状快照（配置条目 / 插件 / patch id / agent / skills）
+│       ├─ checks.js            # §7 的全部 14 项检查
+│       ├─ plan.js              # 逐项计划 + diff + 默认勾选规则
+│       ├─ snapshot.js          # 写前快照、回滚、剪枝
+│       └─ apply.js             # 配置 / 文件 / 插件 / skills 的应用与回滚包装
+├─ test/                        # node:test：单元 + 端到端 + 路由硬化（fake-host 内存宿主）
+├─ client/                      # ✅ 设置页 UI（手写零构建 bundle，settings.section，仅中文）
+└─ 🔜 阶段二新增：src/transport/（webdav.js、gist.js）、src/restart.js、src/recovery.js
 ```
 
 ### 8.3 服务依赖与调用点
@@ -665,7 +704,7 @@ dsh-BrittleBackup/                 ← 仓库根（npm 包名 dsh-brittlebackup�
 | 缺 key 清单 | `ctx.credentials.describe` | 不可用 → 只输出 `requiredCredentials` 名单 |
 | skill 元数据 | `ctx.skills.list` | 不可用 → 直接扫 `<DSH_HOME>\skills` 目录 |
 | 自身设置 | `ctx.settings`（命名空间 = entry id `brittle-backup`） | 不可用 → 本次不改动自身设置，仅用默认值 |
-| 目录选择 | `ctx.directoryPicker`（宿主）/ `uiWorkspace.pickDirectory()`（客户端） | 不可用 → 写入 `<DSH_HOME>\dsh-brittle-backup\` 并提示路径 |
+| 目录选择 | `ctx.directoryPickerController.pick()`（宿主 Remote）/ 客户端 `uiWorkspace.pickDirectory()`（注意：`ctx.directoryPicker` **本身只有 `capability()`**） | 不可用 → 写入 `<DSH_HOME>\dsh-brittle-backup\exports\<ts>\` 并提示路径（选择器白名单见 §17.2） |
 | 路由 | `ctx.webServer.register` | 不可用 → 无 UI（本插件**不注册工具 / 命令**，见 U24） |
 
 **能力探测统一写法**：每次调用前检查 `typeof service?.method === 'function'`，缺失走降级分支；**禁止**在插件加载（loader）阶段因服务缺失而抛错。
@@ -679,27 +718,30 @@ dsh-BrittleBackup/                 ← 仓库根（npm 包名 dsh-brittlebackup�
 5. `peerDependencies` 声明 `@deepseek-ai/cordis` / `@deepseek-ai/dsh-settings` 等为可选（`peerDependenciesMeta.optional`），避免版本漂移导致装不上。
 6. 不使用原生扩展（native addon）：Windows 上无法卸载已加载的 `.node`，会让"卸载→重装"变成 EPERM 死锁。
 7. 自己的 loader entry id 用独占前缀 `brittle-backup`（UI 半为 `brittle-backup-ui`），避免与第三方 bundle 撞 id（撞了会导致整个 profile 起不来）。
+8. **文件操作例外（U34）**：除 §17.4 列出的三个路径（快照目录 / 用户选定导出目录 / `<DSH_HOME>\skills`）外，一律不直接用 `node:fs`；第 1 条（不深路径 import DSH 内部模块）不因本例外而放宽。
 
-### 8.5 数据流
+### 8.5 数据流（阶段一）
 
 ```
-              ┌─────────────── 备份 ───────────────┐
-profile 文件 ─┐                                     ├─ backup.json（含 doc）
-node_modules ─┤→ 采集 → 剥离密钥 → 组装 → 自查扫描 ─┤─ backup.md + skills.zip（附件，可选上传）
-credentials ──┘   (只取 ref 名)                     └─ 本地目录 <DSH_HOME>\dsh-brittle-backup\
-                          │
-                          ├─→ GitHub Gist API
-                          └─→ WebDAV（硬化 / 私有目标）
+              ┌──────────────── 导出 ────────────────┐
+profile 条目 ─┐                                      ├─ <用户自选目录>\dsh-brittle-backup-<ts>\
+package.json ─┤→ 采集 → 剥离密钥 → 组装 → 自查扫描 ──┤   ├─ backup.json
+pnpm-workspace┤   (credentials 只取 ref 名)          │   ├─ 兜底文档.md
+credentials ──┘                                      │   └─ skills\（勾选时，逐字节）
+                                                     └─ 内部目录 <DSH_HOME>\dsh-brittle-backup\（快照 / temp）
 
-              ┌─────────────── 恢复 ───────────────┐
-远端/本地 ──→ 严格校验 → 只读预览(diff+级别) → 用户勾选 → 快照
+              ┌──────────────── 导入 ────────────────┐
+本地目录 ──→ 严格校验 → 只读预览(diff+级别) → 用户勾选 → 快照
                                                       │
-                              ┌───────────────────────┴────────────────────────┐
-                       profile 合并写入                     pluginManager.installBundle 逐项
-                              └───────────────┬────────────────────────────────┘
-                                       汇总 + 缺 key + 重启提示
-                                       失败 → 回滚到快照
+                    ┌─────────────────────────────────┴────────────────────────────┐
+             configEditor.edit 按 id 合并                     pluginManager 安装 / 启停对齐
+             （package.json 只读，不写，U37）                    （失败项隔离，不整体失败）
+                    └─────────────────┬───────────────────────────────────────────┘
+                              汇总 + 缺 key + "需要重启"提示
+                              失败或取消 → 回滚到快照（残留必须列出）
 ```
+
+> 🔜 阶段二才有的分支：上传到 GitHub Gist / WebDAV、下载、远端保留与清理、一键立即重启。
 
 ---
 
@@ -726,37 +768,49 @@ credentials ──┘   (只取 ref 名)                     └─ 本地目录
 | 某配置文件不可读（权限/占用） | 记警告，继续（该文件标 `skipped`） |
 | `package.json` 不可读或非法 JSON | 备份失败（唯一硬失败），给出路径与原因 |
 | 无 `skills` 目录 | 正常，`skills: []`，文档中写"本机未发现 skills" |
-| 产物体积超限 | 拒绝上传，提示"关闭某些项（如包含完整配置原文的文档）后重试" |
-| 上传网络失败/超时 | 保留本地产物，报告 HTTP 状态与可操作建议（404 → 目录问题；401/403 → 凭据问题；私网被拒 → 提示开启私有目标模式） |
-| WebDAV URL 非法 | 按 §6.3 分类给出**具体**原因（不是笼统的 invalid URL） |
-| Gist 超过 1 MiB | 拒绝并建议改用私有仓库后端或仅上传精简 JSON |
-| 恢复时 DSH 版本不同 | 警告 + 继续，逐项标注风险 |
+| 产物体积超限 | **明确报错**并给出当前体积与上限，**不静默截断**；提示关闭某些勾选项后重试 |
+| 🔜 上传网络失败/超时（阶段二） | 保留本地产物，报告 HTTP 状态与可操作建议（404 → 目录问题；401/403 → 凭据问题；私网被拒 → 提示开启私有目标模式） |
+| 🔜 WebDAV URL 非法（阶段二） | 按 §6.3 分类给出**具体**原因（不是笼统的 invalid URL） |
+| 🔜 Gist 超过 1 MiB（阶段二） | 拒绝并建议改用私有仓库后端或仅上传精简 JSON |
+| 恢复时 DSH 版本不同 | 警告 + 继续，逐项标注风险（`dshVersion` 为 `unknown` 时降级为信息级） |
 | 某插件安装失败 | 该插件标失败并从 manifest 回退（避免幽灵依赖让 pnpm 全盘拒装），其余继续 |
 | 恢复中途异常 | 回滚到快照；回滚不完整则显式列出残留文件 |
+| 用户取消导入 | 停止剩余项 + 回滚已写入项；`cancelInstall` 返回 `too-late` 的项单独说明；报告列出无法回滚的残留 |
+| 目录选择器不可用 | 退化为写 `<DSH_HOME>\dsh-brittle-backup\exports\<ts>\` 并提示路径；不维护历史列表 |
+| 导出目录重名（同秒） | 派生 `-2`、`-3` 后缀，绝不覆盖既有数据 |
+| 导入来源同时存在多份产物 | 列出候选目录让用户选择；均无 `backup.json` 时明确报错并说明期望结构 |
+| 快照无法写入 / 剪枝失败 | 视为**硬失败**：不进入写入阶段；剪枝失败只记警告（不影响本次导入结果） |
 | 服务缺失（老/新 DSH） | 走 §8.3 降级分支，UI 明示"当前版本不支持自动 X" |
-| 有 agent 在运行 | 拒绝写 profile，提示稍后重试 |
+| 有 agent 在运行 | 拒绝写 profile，提示稍后重试（判定与 fail-open 见 §6.2 硬性规则） |
 
 ---
 
-## 11. 测试方案
+## 11. 测试方案（阶段一）
 
 **单元测试**
-- `redact`：内联 `apiKey`、嵌套 provider、`apiKeyEnv`（不应被剥）、注释中的疑似密钥、已 `REDACTED` 的值（幂等）。
-- WebDAV URL 策略：公网/私网/CGNAT/`.local`/`localhost`/userinfo/scheme × 两种模式，逐条断言"接受/拒绝 + 具体原因"。
-- 产物校验：路径穿越、绝对路径、重复路径、超大、缺 `package.json`、未知 `version`。
-- 恢复计划：§7 每一条检查各一例，断言级别（拦截/警告/信息）。
-- 合并语义：目标机多出的插件不消失、同名冲突按规则处理、bundle 列表取并集。
-- 文档生成：给定 JSON → 文档包含全部 provider/模型/skill 名称与可粘贴 YAML（用快照测试固定模板）。
+- `redact`：内联 `apiKey`、嵌套 provider、`apiKeyEnv`（不应被剥）、注释中的疑似密钥、已 `REDACTED` 的值（幂等）；`secrets[].path` 为字符串数组时的路径匹配。
+- 采集筛选（U36）：`override` 为空的条目**不入产物**；`enabled: false` 的插件被正确标记。
+- 产物校验：format / version 闸门、路径穿越、绝对路径、重复路径、超大、缺 `package.json`、未知 `version`。
+- 恢复计划：§7 每一条检查各一例，断言级别（拦截 / 警告 / 信息）。
+- 合并语义：目标机多出的插件不消失；同 `id` 条目默认保留目标机；`enabled` 分支（已装被禁用 → `setBundleEnabled`，不重装）。
+- agent 闸门：`status === 'running'` 才拦；服务缺失 / 状态异常 fail-open。
+- 来源选择：目录自身含 `backup.json` / 子目录多份 / 零份 三条分支。
+- 文档生成：给定 JSON → 文档包含全部 provider/模型/skill 名称与可粘贴 YAML（快照测试固定模板）；断言文档**不含**主机名与本机路径。
 
-**集成测试**
-- mock WebDAV 服务器（本地 http 服务器）：MKCOL 405、PUT 404、302 跳转、超大响应、401。
-- fixture profile（样例 `package.json` + `cordis.patch.yml`）：备份 → 修改 → 恢复 → 断言文件内容。
+**集成测试（fixture profile：样例 `package.json` + `cordis.patch.yml`）**
+- 导出 → 改动 → 导入 → 断言文件内容与配置条目一致。
+- skills 目录树往返：含子目录、空目录、二进制文件（如 png）逐字节一致。
+- 中途取消 / 注入失败（只读目录、agent 在跑、安装失败）→ 断言回滚与报告；`cancelInstall` 返回 `too-late` 的分支单独断言。
+- 路由硬化：非 loopback、`Forwarded` / `X-Forwarded-For`、`Origin` ≠ `Host`、GET 触发写操作 —— 四类请求均被拒绝。
+- 预览只读：①–⑤ 期间对文件系统做只读快照比对，断言零写入。
 
 **端到端演练（发版前必做）**
-1. 备份当前 profile → 上传到**公网** WebDAV → 下载 → 恢复 → 与原状态一致。
-2. 同上换**局域网** WebDAV（私有模式）。
-3. 干净 profile 上仅凭兜底文档手工重配 → 能跑起来。
-4. 注入失败（断网、只读目录、有 agent 在跑）→ 断言回滚与提示。
+1. 在本机 profile 导出 → 换一台机器 / 干净 profile 导入 → 断言"插件齐全、模型可用（补 key 后）、skills 就位"。
+2. 干净 profile 上**仅凭兜底文档**手工重配 → 能跑起来（S4 盲测）。
+3. 注入失败（只读目录、有 agent 在跑、安装失败）→ 断言回滚与提示。
+4. 人为制造"服务缺失"（模拟 `configEditor` / `settings` 不可用）→ 断言不写配置条目且提示正确。
+
+> 🔜 阶段二测试（mock WebDAV、公网 / 局域网演练、SSRF 判定矩阵、重启恢复页）见 §0.8 与 [SECURITY.md](SECURITY.md) §3。
 
 ---
 
@@ -764,13 +818,14 @@ credentials ──┘   (只取 ref 名)                     └─ 本地目录
 
 | 里程碑 | 交付 | 验收 |
 |---|---|---|
-| **M0 骨架** | 插件可被 DSH 加载；配置 schema；能力探测与降级框架；日志脱敏 | 加载不报错；卸载后 profile 无残留 |
-| **M1 采集与产物** | profile/插件/模型/skills 采集；密钥剥离；JSON + 文档生成；本地导入导出 | 单元测试通过；S2 达成 |
-| **M2 恢复** | 校验、预览计划、§7 检查项、合并写入、快照回滚 | 集成测试通过；S6 达成 |
-| **M3 兜底文档** | 文档模板定稿 + 恢复报告联动 | S4 盲测通过 |
-| **M4 WebDAV** | 双模式、MKCOL/PUT/**PROPFIND**/GET/**DELETE**、重定向、超时/上限、错误文案、**远端保留清理** | S3 达成 + 历史保留与清理验证 |
-| **M5 GitHub** | Gist（覆盖式）+ **私有仓库 Contents API（历史 + 清理）** | 真实 Gist 与私有仓库演练均通过 |
-| **M6 UI** | **顶层设置页（`settings.section`）**：目标管理、触发、恢复向导（页内子视图）、历史与保留 | 手工验收 + §0 边界逐条对照 |
+| ✅ **M0 骨架** | 插件可被 DSH 加载；能力探测与降级框架；日志脱敏；路由骨架与硬化 | 自检通过；`apply()` 在无任何服务时不抛错；卸载后 profile 无残留（`cordis.patch.yml` 只有一个 insert entry） |
+| ✅ **M1 采集与产物** | profile/插件/模型/skills 采集；密钥剥离；JSON + 文档生成；本地导出 | 单元测试通过；S2 达成（产物零密钥） |
+| ✅ **M2 恢复** | 校验、预览计划、§7 全部 14 项检查、深度合并写入、快照回滚、取消 | 集成测试通过；S6 达成（失败 / 取消都能回滚） |
+| ✅ **M3 兜底文档定稿** | 文档模板（含"本次包含什么"、可粘贴片段、默认模型回落）+ 自动化盲测脚本 | 模板完成；**盲测脚本** `scripts/doc-audit.mjs` 已能对真实产物逐项判定"只看文档能否重配"，并有正反两个用例；人工盲测仍留给你 |
+| ✅ **M4 UI** | 顶层设置页（`settings.section`）：导出勾选与落点、导入向导（预览 / 14 项检查 / 逐项勾选 / 进度 / 取消）、降级提示 | 客户端契约实测确认（`__ModuleLoader__` 工厂 + `slots.register`）；宿主侧仿真断言装载形状 / 注册参数 / 渲染内容 / 无服务降级 |
+| ⏳ **M5 阶段一验收** | 降级分支演练、密钥扫描、盲测、卸载无残留、**真实 DSH 加载** | §14 全表打勾（**需要你在真实 DSH 里装一次**） |
+| 🔜 **M6 WebDAV**（阶段二） | 双模式、MKCOL/PUT/**PROPFIND**/GET/**DELETE**、重定向、超时/上限、错误文案、**远端保留清理** | S3 达成 + 历史保留与清理验证 |
+| 🔜 **M7 GitHub**（阶段二） | Gist（覆盖式）+ **私有仓库 Contents API（历史 + 清理）** | 真实 Gist 与私有仓库演练均通过 |
 
 每个里程碑都要求：**默认不产生任何写操作**（本地落盘除外），恢复类写操作必须先有快照。
 
@@ -792,18 +847,31 @@ credentials ──┘   (只取 ref 名)                     └─ 本地目录
 
 ---
 
-## 14. 验收清单（v1.0 发布前逐条打勾）
+## 14. 验收清单（阶段一发布前逐条打勾）
 
-- [ ] 备份产物 JSON 通过 schema 校验，且 `redactions[]` 与实际剥离项一致。
-- [ ] 对当前 profile 做一次全量备份，正则扫描无密钥命中。
+> 行为级验收以 [SCOPE-PHASE1.md](SCOPE-PHASE1.md) §6 为准；下表是发布前的总检查单。
+
+- [ ] 导出目录结构正确（`backup.json` + `兜底文档.md` + 勾选时的 `skills\`），同秒重名派生后缀且不覆盖旧目录。
+- [ ] `backup.json` 通过 schema 校验（含 `producer.hostname`、`plugins[].enabled`），且 `redactions[]` 与实际剥离项一致。
+- [ ] `entries[]` 只含**有 override 的 patch 目标条目**；`inherited` 不参与还原。
+- [ ] 对当前 profile 做一次全量导出，正则扫描无密钥命中。
 - [ ] 兜底文档在**不看源码、不问题作者**的情况下能指导完成重配（S4）。
-- [ ] 公网 WebDAV 与局域网 WebDAV 各完成一次上传 + 下载 + 恢复。
-- [ ] 备份文件指向目录而非文件、URL 带 userinfo、目标解析到私网，三种情况都给出**具体**错误原因。
-- [ ] 恢复一次含 5 个插件的备份：逐项安装、失败项隔离、合并语义生效。
-- [ ] 人为制造中途失败：断言回滚到操作前状态。
-- [ ] 有 agent 运行时发起恢复：断言被拒绝且不写任何文件。
+- [ ] 兜底文档不含主机名 / 账号名 / 配置原文 / 本机路径。
+- [ ] 导入来源三分支正确（目录自身含 `backup.json` / 子目录多份列出候选 / 零份报错）。
+- [ ] 校验与预览阶段零写入（只读断言）。
+- [ ] 导入一次含 5 个插件的产物：已装项对齐启用状态、缺失项逐项安装、失败项隔离、合并语义生效。
+- [ ] skills 目录树（含子目录与二进制）逐字节往返一致。
+- [ ] 缺 key 提示正确区分"已配置 / 缺失"。
+- [ ] 人为制造中途失败：断言回滚到操作前状态，残留被列出。
+- [ ] 中途取消：断言停止剩余项 + 回滚已写入项。
+- [ ] 有 agent 运行时发起导入：断言被拒绝且不写任何文件；`agents` 缺失时断言不阻断。
+- [ ] `configEditor` / `settings` 不可用时不写配置条目、提示正确，且 `package.json` / `pnpm-workspace.yaml` 采集展示仍正常。
+- [ ] `pnpm-workspace.yaml`（`allowBuilds`）还原必须显式确认 diff 才写入。
+- [ ] 路由硬化：非 loopback / 转发头 / 跨源 / GET 写操作 四类请求均被拒绝。
+- [ ] UI 闭环：一个顶层设置页内完成 选目录 → 勾选 → 导出 → 预览 → 勾选 → 导入 → 报告 → 取消。
 - [ ] 卸载本插件后，profile 不残留：manifest 无条目、无孤儿文件、`cordis.patch.yml` 无残留 `insert:`。
 - [ ] 升级 DSH 一个小版本后插件仍能加载（功能可降级）。
+- [ ] 全仓库无网络代码（无 `node:https` / `undici` / WebDAV / GitHub 调用）。
 
 ---
 
@@ -821,7 +889,9 @@ credentials ──┘   (只取 ref 名)                     └─ 本地目录
 | loader entry id 冲突检测 | `lib\profile.js`（`bundlePatchInsertedIds` / `conflictingEntryIds`） |
 | 读 lockfile 中的 git commit | `lib\profile.js`（`readLockCommits` / `readGitResolutionCommit`） |
 | 插件安装的外部进程方案 | `lib\dsh-cli.js`——其 `dshArgv()` 的 **PATH 回落在本机 Desktop 形态下不成立**，详见 §0.3 |
-| 自重启实现（**首版需移植并改造**，不是"不推荐采用"） | `lib\restart.js`（28 KB）+ `lib\recovery.js`（48 KB）+ `resources\runtime\cli\bin\dsh.cmd`（正确的启动配方） |
+| 自重启实现（🔜 **阶段二**需移植并改造） | `lib\restart.js`（28 KB）+ `lib\recovery.js`（48 KB）+ `resources\runtime\cli\bin\dsh.cmd`（正确的启动配方） |
+| agent 忙碌闸门（`status === 'running'` + fail-open） | `…\dshmarket\lib\agents.js`（`runningAgentIds`） |
+| 客户端半契约（`dsh.client` 声明、slot 注册、client 构建链） | `…\dshmarket\package.json`（`dsh.client.inject` / `platform` / `exports["./client"]`）+ `…\dshmarket\client\client.js` |
 | skill 根目录解析 | `…\@michengai\dsh-skills-manager\lib\core.js`（`join(resolveDshHome(), "skills")`） |
 | 目录/凭据布局 | `C:\Users\Maxxie\.dsh\`、`…\profiles\desktop\` |
 
@@ -848,7 +918,136 @@ credentials ──┘   (只取 ref 名)                     └─ 本地目录
 |---|---|---|
 | ~~Q1~~ | ~~新仓库放在哪个路径~~ | **已解决**：仓库落在 `F:\Git\dsh-brittleBackup`，remote `origin = https://github.com/toookamak/dsh-brittleBackup.git`。注意目录名 / 仓库名是小写 `b`，与文档命名表的展示名 `dsh-BrittleBackup` 存在大小写差异，实现时统一 |
 | ~~Q2~~ | ~~v1 是否包含客户端 UI~~ | **已解决：包含**。形态 = 顶层独立设置页（`settings.section`），全部边界见 §0 |
-| ~~Q3~~ | ~~GitHub 后端 v1 只做 Gist，还是同时做私有仓库 Contents API~~ | **已解决**：**两个都做**（U27）；历史模式与远端保留见 U26 / U28 / U29 |
+| ~~Q3~~ | ~~GitHub 后端 v1 只做 Gist，还是同时做私有仓库 Contents API~~ | **已解决**：**两个都做**（U27）；历史模式与远端保留见 U26 / U28 / U29。**该决策已随阶段一后置到阶段二** |
+| **Q4** | 宿主 `directoryPicker.capability()` 是否提供"发起选择"的能力？若否，落点校验走"客户端选择器返回值 + 宿主白名单"（§17.2） | 决定导出落点 / 导入来源是否需要在页面与宿主之间传路径，以及如何满足 [SECURITY.md](SECURITY.md) §4.5 |
+| **Q5** | `configEditor.entries()` 返回的条目如何映射到"patch 目标 id"（实测 loader 内部 id 形如 `include:llm-pi-ai`，而 profile patch 用 `llm-pi-ai`） | 决定 `entries[].id` 与 `edit(entry, change)` 的取值 |
+| **Q6** | 宿主 `connection.requestRejection` / `admit` / `authorizeIndex` 是否覆盖 [SECURITY.md](SECURITY.md) §4 的第 1–3 条 | 决定路由硬化是复用官方信任闸门还是自研 |
+
+---
+
+## 17. 实现契约（2026-10-02 第二次修订补齐）
+
+> 本节把"原文里不够明确、会让实现者各自发明"的部分收敛成可执行规格。依据：2026-10-02 对本机宿主的只读内省（Service / Slots / Config provider）、本机 profile 实测、dsh-market `1.66.7` 源码。
+>
+> 本节与 [SCOPE-PHASE1.md](SCOPE-PHASE1.md) / [FORMAT.md](FORMAT.md) / [SECURITY.md](SECURITY.md) 一致；冲突时以那三份为准（范围 → SCOPE；产物 → FORMAT；安全 → SECURITY）。
+
+### 17.1 服务调用规范
+
+服务签名清单见 §3.4。三条容易踩的补充：
+
+1. `settings.describe()` 是**同步**方法；`describe({ redactSecrets: true })` 的 `secrets[].path` 是**字符串数组**（`RedactedSecret = { path: string[]; set: boolean }`），不是点分字符串。
+2. 写自己的设置要带**乐观锁**：先 `describe()` 取 `revision` → `update(ns, patch, revision)`；revision 冲突时重新 `describe()` 重试一次，仍失败则提示用户，不静默覆盖。
+3. `configEditor.edit(entry, change)` 需要 **Entry 对象**（来自 `entries()`），不是 id 字符串；产物里记录的是 **patch 目标 id**（见 §17.5）。
+4. **源码形态：纯 ESM JavaScript、零依赖、零构建**（`src/*.js`）。这台机器的 profile 里没有 `typescript` / `tsdown`；"零依赖"同时满足"抗升级"与"离线可跑"。验收靠 `npm run verify`（自检 + `node --test`）。
+5. **插件自身设置不写 profile 配置**：落在 `<DSH_HOME>\dsh-brittle-backup\settings.json`（见 [SECURITY.md](SECURITY.md) §2.4）。因此本插件**不导出 `Config` schema** —— 宿主 0.2 代的 settings 命名空间由 Config schema 派生，为一个"上次导出目录"静态 import `@deepseek-ai/schemastery` 会引入"依赖缺失 = 宿主起不来"的风险，与"loader 零副作用"冲突。代价：宿主通用的插件配置页不会显示本插件的偏好（本插件的偏好由 M4 的设置页自己读写）。
+
+### 17.2 宿主 ↔ 客户端接口契约
+
+路由统一前缀 `/brittle-backup`，全部经 [SECURITY.md](SECURITY.md) §4 硬化：
+
+| 方法 | 路径 | 请求体 | 响应 | 副作用 |
+|---|---|---|---|---|
+| GET | `/brittle-backup/state` | — | `{ task: { id, kind: 'export' \| 'import', phase, progress, startedAt, result?, error? } }` | **无** |
+| POST | `/brittle-backup/export` | `{ options, targetDir }` | `{ taskId }` | 写导出目录 |
+| POST | `/brittle-backup/inspect` | `{ sourceDir }` | `{ artifact, checks[14], diff[], plan }` | **无**（只读预览） |
+| POST | `/brittle-backup/pick` | `{ path? }` | `{ path, via: 'host-picker' \| 'registered' }` | 宿主发起选择，或登记一次客户端选择器的返回值 |
+| POST | `/brittle-backup/import` | `{ sourceDir, selection }` | `{ taskId }` | 写 profile 配置 / skills |
+| POST | `/brittle-backup/cancel` | `{ taskId }` | `{ canceled, rolledBack, residuals[] }` | 回滚已写入项 |
+
+- **任务状态由宿主侧持有**（内存）：页面轮询 `GET state`，重开设置页可见进度与结果；DSH 重启则任务丢失，**不承诺续跑**（D5）。
+- **同一时刻只允许一个写任务**；已有写任务进行中时，第二个写请求返回 `409`。
+- `targetDir` / `sourceDir` **必须命中"最近一次选择器返回值"白名单**（一次性、用后失效）；否则 `403`。页面自由构造的路径一律拒绝。
+- 错误响应统一 `{ error: { code, message, detail? } }`，`code` 取稳定枚举：`ARTIFACT_INVALID`、`ARTIFACT_VERSION_UNSUPPORTED`、`AGENTS_RUNNING`、`SERVICE_UNAVAILABLE`、`PICKER_NOT_ALLOWED`、`PATH_UNSAFE`、`BUSY`、`CANCELED`、`ROLLBACK_INCOMPLETE`。
+- 无 UI（`webServer` 或客户端 slots 不可用）时，宿主侧仍按 §4.2 降级：本期**不提供**命令 / 工具入口（U24），因此这种情况下仅内部能力可用。
+
+### 17.3 客户端半契约（M4 已实现，2026-10-02 实测确认）
+
+**宿主装载契约（从参考实现的产物逆向确认）**：客户端半是一个由宿主 web shell 注入的**单文件 ESM**，必须以
+
+```js
+window.__ModuleLoader__.load({ id: '<npm 包名>', factory: (require) => { /* … */ return module.exports } })
+```
+
+登记自己；`factory` 通过宿主给的 `require()` 取外部模块（`react` 属于基线模块表，无需在 `dsh.client.inject` 里声明）。`module.exports` 必须是 `{ name, inject, apply }`：`inject` 是**客户端服务名**数组，`apply(ctx)` 里注册 slot。
+
+- `package.json` 声明 `dsh.client = { inject: ["@deepseek-ai/dsh-client-ui-settings"], platform: "web" }`；`exports["./client"] = "./client/client.js"`；`dsh.bundle.patch` 指向自带 patch。`id` 必须等于 npm 包名（实测 dsh-market 也是这么做的：包名 `dshmarket` → `id: "dshmarket"`）。
+- **零构建**：本插件的客户端半是**手写**的（只用 `React.createElement`，不用 JSX、不引 UI primitives、不依赖打包工具），所以这台没有 `tsdown`/`esbuild` 的机器也能交付 UI；`files` 里带 `client/`，`npm pack --dry-run` 已确认产物包含它。
+- **注册方式**：客户端 `slots` 服务，注册到 **`settings.section`**：
+  ```js
+  slots.inject('settings.section', () => slots.register(
+    { name: 'settings.section', id: 'brittle-backup', order: 41, label: '兜底备份' },
+    Section,   // React 组件；ownerProps 提供 { close }
+  ))
+  ```
+  `id` 必须自用（复用已存在 id 会顶掉那一页）；当前占用 id：`account`、`general`、`models`、`plugins`、`agency-agents`、`skills-manager`、`agent-presets`、`market`、`better-sidebar`。
+- **目录选择**：客户端 `uiWorkspace.pickDirectory()`（用嵌套 `inject(['uiWorkspace'])` 取，缺失就退化为"把绝对路径登记进来"）。
+- 页面**只**通过 §17.2 的路由与宿主通信，不直接操作文件系统；不注册工具、不注册聊天命令（U24 / D4）。
+- 页面结构（U1 / U3 / U4）：一个设置页内三个面板 —— ① 导出（6 个勾选项 + 落点）、② 导入（来源 → 只读预览 → 14 项检查 + 逐项勾选 + `allowBuilds` 显式确认 → 开始导入）、③ 任务进度（阶段 / 警告 / 结果 / 取消）。
+
+### 17.4 文件写入与回滚策略（U34）
+
+- 允许 `node:fs` 的三个范围见 [SCOPE-PHASE1.md](SCOPE-PHASE1.md) §4.6；越界即 bug。所有写 / 删前先 `path.resolve` + 前缀校验，防 `..` 穿越。
+- **快照**：写到 `<DSH_HOME>\dsh-brittle-backup\snapshots\<ts>\`，内容 = 本次将覆盖文件的**原内容** + 本次将新建文件的**路径清单**（`manifest.json`）。保留最近 10 份，超出按时间戳剪枝（剪枝失败只记警告）。
+- **回滚**（顺序固定）：删除 manifest 中"本次新建"的路径 → 还原"本次覆盖"的原内容 → 删除本条 manifest。任何一步失败都要记入 `residuals[]` 并在报告中列出（U21）。
+- **原子写**：同目录 temp 文件 + rename，不跨盘；`pnpm-workspace.yaml` 的写入必须展示 diff 并显式确认。
+- **深度合并**：产物里有的键覆盖目标，**产物里没有的键一个都不动** —— 所以被剥离的 `apiKey` 不会抹掉目标机原有的值（浅合并会，这是踩过的坑）。
+- **剥离值不往返**：产物的 `<REDACTED>` 只进报告（`redactedSkipped`），**绝不写回配置**，也绝不出现在兜底文档的可粘贴片段里（那里会换成"请自己填这一项"的提示）。
+- **单项失败不整体回滚**：某文件被占用 / 权限不足 → 该项标失败 + 警告，继续其他项；但**快照阶段失败是硬失败**，不进入写入阶段。
+- **目录树复制**（skills 与导出目录）：递归复制并**保留子目录、空目录与二进制内容**；导入同名 skill 时按用户选择 覆盖 / 跳过 / 重命名，绝不删除目标机其它 skill。
+- **取消**：停止剩余项 → 对正在进行的安装调 `pluginManager.cancelInstall(requestId)`（`too-late` 必须在报告中说明）→ 执行回滚。
+
+### 17.5 采集与判定口径（把 §7 的检查落到实处）
+
+| 议题 | 口径 |
+|---|---|
+| `entries[]` 收录范围 | 只收 `configEditor.configuration()` 中 `override` **非空**的条目；`entries[].id` = profile patch 里的 `- id:`（patch 目标 id，Q5） |
+| `package.json` 写入 | 本插件**不写**（U37）：只读采集；安装 / 启停全部走 `pluginManager`（其失败时自行还原 `package.json` 与 lock） |
+| `enabled` 来源 | `pluginManager.listBundles()` / `listPlugins()` 的 `enabled` |
+| 恢复插件分支 | 目标机**缺失** → `installBundle(spec, { enabled })`；**已装** → `setBundleEnabled` / `setPluginEnabled` 对齐启用状态，**不重装**；**已装但版本不同** → 默认保留目标机版本（§7-#7），用户显式勾选才按精确版本覆盖 |
+| DSH 版本来源 | 取核心 bundle `@deepseek-ai/dsh-base` 的 `version`（`listBundles()`）；取不到写 `"unknown"`，此时 §7-#3 降级为信息级 |
+| agent 忙碌判定 | `agents.list()` 中存在 `agent.status === 'running'`；服务缺失 / 抛错 / 状态未知 → **fail-open**（只 warn 一次） |
+| 目录选择 | 见 §17.2 白名单；`directoryPicker` 只有 `capability()`，**不能发起选择**（Q4） |
+| 导入来源 | 目录自身含 `backup.json` → 用它；否则在直接子目录里找匹配 `dsh-brittle-backup-*` 且含 `backup.json` 的候选：1 个直接用，多个列出让用户选，0 个报错并说明期望结构 |
+| 本插件自身 entry | 随配置导出（它可能含"上次导出目录"这类本机路径）；导入时按同 id 冲突（§7-#12）**默认保留目标机当前值** |
+| `absent[]` | 只在报告中展示，**永不触发删除** |
+| skills 扫描回退 | `skills` 服务缺失 → 直接扫 `<DSH_HOME>\skills`（user 级） |
+| 导出重名 | 目标目录已存在（同秒）→ 派生 `-2`、`-3` 后缀 |
+| spec → 来源类型 | `link:`/`file:` → local-path（绝对路径标 `unportable`）、`github:`/`git+*`/`http(s):` → github、`npm:` → registry、其余协议 → unknown，**裸 semver / 范围（`^1.66.7`）→ registry** |
+| 安装命令 | registry 用解析到的精确版本（`dsh plugin add <name>@<version>`），拿不到版本时 `dsh plugin add <name>`；其他来源原样用 spec |
+| 自查扫描假阳性 | `long-hex` / `long-base64` 在哈希状指针（`commit` / `*Version` / `createdAt` / `hostname` / `node` / `platform` / `arch`）上跳过，纯 hex 不按 base64 判 |
+
+### 17.6 阶段一里程碑
+
+见 §12 的 **M0–M5**（骨架 → 采集与产物 → 导入 → 兜底文档 → UI → 验收）；M6 / M7 为阶段二。
+
+### 17.7 待实测确认（结论随实现回填）
+
+| # | 事项 | 状态 / 影响 |
+|---|---|---|
+| Q4 | `directoryPicker.capability()` 是否提供发起选择的能力 | **仍未实测**。代码已两条路都实现：宿主 `directoryPickerController.pick()` 优先，客户端选择器走 `POST /pick { path }` 一次性登记 |
+| Q5 | `configEditor.entries()` 返回条目 → patch 目标 id 的映射 | **已确认**：宿主 Config 目录显示条目同时有 loader id（`include:llm-pi-ai`）与 `patchId`（`llm-pi-ai`）；实现用 `entry.patchId ?? entry.id` 并剥掉 `include:` 前缀 |
+| Q6 | `connection.requestRejection` / `admit` / `authorizeIndex` 是否覆盖 [SECURITY.md](SECURITY.md) §4 的第 1–3 条 | **仍未实测**。当前是自研硬化（loopback / 转发头 / 同源），已有自动化断言；确认后可考虑复用官方闸门 |
+| Q7 | `fs.writeText` 是否自动创建父目录 | **已绕开**：需要建目录的地方一律用受限 `node:fs` 显式 `mkdir`，不依赖 `fs` 服务的隐式行为 |
+
+### 17.8 实现进度与验证证据（2026-10-02）
+
+| 项 | 状态 | 证据 |
+|---|---|---|
+| M0 骨架 | ✅ | `src/index.js` 导出 `name` + `apply`，只挂路由；无任何服务时不抛错（`test/index.test.js`）；`npm run check` 断言仓库无网络代码、不读写 `.credentials.yaml` |
+| M1 采集与产物 | ✅ | `src/collect/*` + `src/artifact.js` + `src/doc.js` + `src/export.js`；`test/collect.test.js`、`test/artifact.test.js`、`test/doc.test.js` |
+| 产物零密钥（S2） | ✅ | 端到端用例断言 `backup.json` 与兜底文档都不含内联密钥，且 `items.redactions[]` 与实际剥离项一致（`test/roundtrip.test.js`） |
+| M2 导入还原 | ✅ | `src/restore/*`；14 项检查逐项断言（`test/checks.test.js`）、计划与默认勾选规则（`test/plan.test.js`）、端到端导入（`test/roundtrip.test.js`） |
+| 回滚（S6） | ✅ | 取消导入 → 断言回滚删除本次新建的 skill 目录、`cordis.patch.yml` 回到操作前；agent 忙碌 → 断言拒绝写入且不建快照 |
+| 路由硬化 | ✅ | `test/routes.test.js`：非 loopback / 转发头 / 跨源 / 缺 Origin / 方法不符 / 白名单一次性，全部有断言 |
+| 降级分支 | ✅ | `configEditor`/`settings` 不可用 → 条目不采集但其余照常；`pluginManager` 不可用 → 只记录清单（`test/collect.test.js`）；`agents` 缺失 → fail-open（`test/checks.test.js`） |
+| skills 二进制 | ✅ | 含子目录与二进制内容的 skill 逐字节往返（`test/roundtrip.test.js`） |
+| M3 兜底文档定稿 | ✅ | `src/doc.js`（"本次包含什么" + 可粘贴片段 + 默认模型回落）；`scripts/doc-audit.mjs` 对真实产物逐项审计；`test/doc-audit.test.js` 正反两个用例（删掉一个 provider 后审计必须以 1 退出） |
+| M4 设置页 UI | ✅ | `client/client.js`（手写零构建 bundle）+ `package.json` 的 `dsh.client` / `exports["./client"]`；`test/client.test.js` 用假 `__ModuleLoader__` + 假 react 断言装载形状、注册参数（id/order/label）、三个面板内容、无 picker 时的降级、只调用已实现的路由 |
+| 端到端（走本机路由） | ✅ | `test/e2e-routes.test.js`：完全按浏览器路径跑 登记落点 → 导出 → 轮询状态 → 登记来源 → 只读预览（14 项检查 + 计划）→ 导入 → 报告里含 `redactedSkipped` 与快照；以及 agent 忙碌时 `CHECKS_BLOCKED` 且不建快照 |
+| 完整性检查 | ✅ | `test/integrity.test.js`：`src/` 无孤儿模块、不引用 test/scripts、`client/` 不相对引用宿主半、`package.json` 引用路径都存在且被 `files` 覆盖、README 链接的 docs 都存在、文档状态与仓库一致 |
+| **尚未验证** | ⏳ | ① **真实 DSH 里的加载、设置页显示、卸载无残留**（需要你在 DSH 里装一次）；② 人工盲测（脚本已覆盖可自动化的部分） |
+
+运行方式：`npm run verify`（= `scripts/selfcheck.mjs` + `node --test`，当前 45 个 JS 文件、95 个断言全绿，且自检里含"打包 / 装载契约"断言）；`npm pack --dry-run` 已确认发布产物含 `src/`、`client/`、`cordis.patch.yml`。审计某份产物：`node scripts/doc-audit.mjs <产物目录>`。
 
 ---
 
@@ -856,5 +1055,5 @@ credentials ──┘   (只取 ref 名)                     └─ 本地目录
 
 1. 先做 **M1 + M3**（采集、剥离、兜底文档、本地导出）——即使不做任何网络与恢复，这份文档本身就已经解决了用户"兼容性全炸"的痛点，价值密度最高、风险最低。
 2. 再做 **M2**（恢复），优先把 §7-#1/#2/#6/#13 四条"拦截"级检查做实。
-3. 传输层最后做：先 WebDAV（你的主要诉求，含私有模式），后 GitHub。
-4. UI 是**首版范围内的交付**（§0 的 U1 / U3），不是"最后再加"：一个顶层独立设置页承载配置、触发、恢复、历史。演练可先用 host 路由手动触发，但发版必须带 UI。
+3. 🔜 **传输层属阶段二**（先 WebDAV，后 GitHub），本期不做；本期把 §17 的实现契约与 §4.2 的降级分支做扎实。
+4. UI 是**首版范围内的交付**（§0 的 U1 / U3），不是"最后再加"：一个顶层独立设置页承载导出、导入（预览 / 勾选 / 进度 / 取消）与降级提示。演练可先用 host 路由手动触发，但发版必须带 UI（M4）。

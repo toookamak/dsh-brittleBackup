@@ -1,10 +1,10 @@
 # 安全策略（SECURITY）
 
-> 本文描述本插件**承诺做的事**与**明确不做的事**。边界依据：[PROJECT-PLAN.md](PROJECT-PLAN.md) 的 §0（唯一权威）与 [FORMAT.md](FORMAT.md)。
+> 本文描述本插件**承诺做的事**与**明确不做的事**。边界依据：[PROJECT-PLAN.md](PROJECT-PLAN.md) 的 §0（唯一权威）与 [FORMAT.md](FORMAT.md)（产物 schema 唯一权威）。
 >
 > **适用范围：阶段一（仅本地导出 / 导入，见 [SCOPE-PHASE1.md](SCOPE-PHASE1.md)）。** 标有 **🔜 阶段二** 的小节（出站 SSRF、远端删除）本期**不实现**，内容保留以备阶段二，**不作为本期的实现要求**。
 >
-> 文中标注"实测"的结论来自对 dsh-market `1.66.7` 源码与 DSH Desktop `0.2.0-rc.2` 安装目录的只读检查。
+> 文中标注"实测"的结论来自对 dsh-market `1.66.7` 源码、DSH Desktop `0.2.0-rc.2` 安装目录，以及 **2026-10-02 的宿主服务内省（Service / Slots / Config）** 的只读检查。
 
 ---
 
@@ -14,9 +14,11 @@
 2. **永不回显密钥。** 本期没有需要录入的密钥；阶段二引入 WebDAV 密码 / GitHub Token 时，输入框必须为密码型且不可回读，只显示"已配置 / 缺失"。
 3. **密钥永不写入任何产物**（`backup.json`、兜底文档、`skills\` 都不含）。
 4. **可分享产物不含主机信息。** 兜底文档零密钥、零主机名 / 地址 / 账号名、零配置原文、**零本机路径**（U2 / U5 / U20）。
-5. **导出只写用户显式选择的目录**，不经用户同意不写任何其他位置。
-6. **本期没有任何"删除数据"的路径。** 本地模式只写入用户指定目录；远端清理属阶段二，约束见 §5。
-7. **有 agent 在运行时拒绝写 profile**（U21）。
+5. **写操作只发生在三个位置**（U34，完整边界见 [SCOPE-PHASE1.md](SCOPE-PHASE1.md) §4.6）：① 用户**本次显式选择**的导出目录；② 本插件自己的工作目录 `<DSH_HOME>\dsh-brittle-backup\`（快照与临时文件）；③ 导入 skills 时的 `<DSH_HOME>\skills\<name>\`。除此之外不写任何位置。
+6. **本期的"删除"只有两处，且都在自己的地盘内**：① 回滚时删除**本次导入创建**的文件、还原被本次覆盖的文件；② 快照目录按"保留最近 N 份"剪枝。**绝不删除**用户既有 skill、既有导出目录，也没有任何远端删除路径（远端清理属阶段二，约束见 §5）。
+7. **有 agent 在运行时拒绝写 profile**（U21）。判定口径：`agents.list()` 中存在 `agent.status === 'running'`；服务缺失或状态未知 **fail-open**（只记一次 warn），不得因闸门自身故障把功能锁死。
+8. **取消即回滚**（U35 / `D6`）：导入中途取消 → 停止剩余项 + 回滚已写入项；无法回滚的部分必须显式列出，不得假装干净。
+9. **校验与预览不改盘**：format / version、14 项检查、diff 预览期间的任何步骤都不得产生写操作。
 
 ---
 
@@ -49,20 +51,24 @@ DSH_BRITTLE_BACKUP_GITHUB_TOKEN__<目标id>
 
 | 防线 | 手段 | 依据 |
 |---|---|---|
-| ① 权威来源 | `settings.describe({ redactSecrets: true })` 返回的 `secrets?: { path: string[]; set: boolean }[]` —— **宿主自己就知道每个插件 config 里哪些路径是密钥**，用它作为主要依据，而不是猜 | 实测 DSH `settings` 服务契约 |
+| ① 权威来源 | `settings.describe({ redactSecrets: true })` 返回的 `secrets?: { path: string[]; set: boolean }[]` —— **宿主自己就知道每个插件 config 里哪些路径是密钥**，用它作为主要依据，而不是猜 | 实测 DSH `settings` 服务契约（同步方法；`RedactedSecret.path` 是**字符串数组**） |
 | ② 结构化剥离 | 对 `apiKey` / `token` / `password` / `secret` / `authorization` / `cookie` 等字段名做结构化剥离，并记录到 `redactions[]`（[FORMAT.md](FORMAT.md) §4） | 双保险 |
 | ③ 导出前自查 | 正则扫描产物（`sk-`、长 hex / base64 串、`Authorization:`、URL 内嵌 `user:pass`）；**命中即拦截导出**，除非用户显式确认该值可外传 | U20 |
 
 - 剥离必须**幂等**：已剥离的值再次扫描不得报错或重复剥离。
 - `apiKeyEnv` **不得**被剥离——它是名字，不是值。
 - ⚠️ **`skills\` 目录内的文件不做逐字段脱敏**（原样复制）。因此防线 ③ 是它们**唯一**的防线，必须在复制前逐文件扫描。
+- **防假阳性规则（实现约定）**：`long-hex` / `long-base64` 两个模式在"哈希状指针"（`/commit`、`/dshVersion`、`/pluginVersion`、`/createdAt`、`/hostname`、`/node`、`/platform`、`/arch`、`/resolvedVersion`）上跳过；纯十六进制串也不按 base64 判定。否则每个含 git commit 的产物都会被自己拦下。
+- **剥离值不往返**：产物里的 `<REDACTED>` 是占位符，导入侧**绝不把它写回配置**，只在报告里列出被跳过的位置（见 §6）。
 
-### 2.4 本插件自身的 entry
+### 2.4 本插件自身的 entry 与设置
 
-本插件的设置（如上次导出目录、勾选项偏好）落在 `cordis.patch.yml`，因此**会随配置一起被带走**。
+**实现决策（2026-10-02，与早期草案不同）**：本插件**不把自己写进 profile 的 `cordis.patch.yml`**。
 
-- 它**不含任何密钥**；若其中出现疑似密钥，防线 ③ 会拦截导出。
-- **但它可能含本机路径**（如上次导出目录），属本机信息，因此**绝不进入可分享文档**（U5）。
+- 自身设置（上次导出 / 导入目录、勾选项偏好、快照保留数）落在 `<DSH_HOME>\dsh-brittle-backup\settings.json`，由插件自己读写。
+- 理由：① 宿主 0.2 代的 settings 命名空间由插件 **Config schema** 派生，为一个"上次导出目录"去静态 import `@deepseek-ai/schemastery`，代价是"依赖缺失 = 宿主起不来"，与 §1 的"loader 零副作用"冲突；② 导出目录是本机路径，写进 profile 配置就会被自己的备份带走。
+- 因此产物里的 `brittle-backup` 条目**不存在**；导入侧对它也就没有"同 id 条目冲突"要处理。
+- 若将来要把它做进 profile 配置（例如希望随备份一起迁移偏好），必须先解决上面两条理由，并在 [PROJECT-PLAN.md](PROJECT-PLAN.md) §17.1 记录。
 
 ---
 
@@ -90,13 +96,20 @@ DSH_BRITTLE_BACKUP_GITHUB_TOKEN__<目标id>
 
 ## 4. 入站：本插件注册的本机 HTTP 路由
 
-本机路由是与客户端 UI 通信的通道，必须按"这是可从浏览器触发的攻击面"对待：
+本机路由是与客户端 UI 通信的通道，必须按"这是可从浏览器触发的攻击面"对待（接口清单见 [PROJECT-PLAN.md](PROJECT-PLAN.md) §17.2）：
 
 1. **只接受 loopback 直连**：对端地址必须是 `127.0.0.1` / `::1` / `::ffff:127.0.0.1`。
 2. **拒绝一切转发头**：出现 `Forwarded`、`X-Forwarded-For`、`X-Real-IP` 即拒绝（防代理绕过）。
 3. **同源校验**：`Origin` 与 `Host` 必须一致，并对 `Host` 施加 loopback 防 rebinding 规则。
-4. **GET 一律无副作用**：导出、导入、装插件等动作**只能**由 POST 触发。
-5. **导出落点只来自用户显式选择**：目标目录由**系统目录选择器**返回，服务端**不得**接受页面直接传入的任意路径字符串（防"被诱导写到任意位置"）。导入来源同理。
+4. **GET 一律无副作用**：导出、导入、装插件等动作**只能**由 POST 触发；`GET` 只用于读任务状态。
+5. **导出落点 / 导入来源只来自用户显式选择**。实现口径（补齐）：
+   - 宿主侧优先：`POST /brittle-backup/pick` 由宿主自己发起选择（`directoryPickerController.pick()`），返回的路径**直接进白名单**；
+   - 客户端选择器兜底：页面用 `uiWorkspace.pickDirectory()` 选完，再 `POST /pick { path }` **登记一次**；宿主只接受"存在的绝对目录路径"，登记后**一次性**生效；
+   - `/export` 与 `/inspect` 的 `targetDir` / `sourceDir` 必须命中白名单并**用掉即失效**，否则 `403 PICKER_NOT_ALLOWED`；页面自由构造的路径一律拒绝。
+6. **任务状态端点只读**：进度 / 结果查询不得有副作用，也不得回显产物中的敏感字段。
+7. **同一时刻只允许一个任务**：并发写请求返回 `409 BUSY`（防止两次导入互相踩）。
+
+> 📌 **待确认（实现前实测一次）**：宿主已有官方信任闸门 `connection.requestRejection(request)` / `admit(request)` / `authorizeIndex(...)`。若其覆盖面与本节 1–3 一致，**优先复用它并删除自研重复逻辑**；否则保留本节自研实现，并在 §17.7 记录结论。
 
 ---
 
@@ -120,7 +133,10 @@ DSH_BRITTLE_BACKUP_GITHUB_TOKEN__<目标id>
 
 - 逐条校验产物中的 `path`：相对路径、无 `..`、未命中排除名单、无重复。
 - 目标已存在但不是普通文件（目录 / 符号链接）→ **拒绝该项**，不越权删除。
+- **合并用深度合并**：产物里有的键覆盖目标，**产物里没有的键一个都不动**。所以"产物里被剥离的 `apiKey`"不会顺手抹掉目标机原有的值，也不会用 `<REDACTED>` 占位符去覆盖真值 —— 被剥离的位置只进报告（`redactedSkipped`），由用户自己补。
 - 写入用 temp + rename 原子替换；写前快照，失败回滚；回滚不完整必须显式列出残留（U21）。
+- **写入原语的现实约束（U34）**：宿主 `fs` 服务没有删除 / 建目录 / 二进制写原语，**回滚（删除本次新建文件、还原被覆盖文件）与快照剪枝无法只靠它完成**。因此本插件在三个受限范围内直接使用 `node:fs`（边界见 [SCOPE-PHASE1.md](SCOPE-PHASE1.md) §4.6）；每次写 / 删前先做 `path.resolve` + 前缀校验，防 `..` 穿越。
+- **取消语义**：取消 = 停止剩余项 + 回滚已写入项；`pluginManager.cancelInstall(requestId)` 用于正在进行的安装，返回 `cancelled` / `too-late` / `not-running`，`too-late` 时必须说明"该项已进入应用阶段，可能无法回滚"。
 - **不写入**：`cordis.yml`、`node_modules`、`.credentials.yaml`、`.dsh-market`、`.plugin-manager`。
 - **skills 只允许写入 `<DSH_HOME>\skills\<name>\`**：只处理产物里 `scope: "user"` 的 skill；同名时由用户选择 覆盖 / 跳过 / 重命名，**绝不删除目标机已有的其他 skill**。
 - 合并语义：备份里没有的条目一律不删；`absent[]` 不是删除指令。
@@ -132,6 +148,7 @@ DSH_BRITTLE_BACKUP_GITHUB_TOKEN__<目标id>
 - 密码 / Token 从不出现在日志、错误消息、报告或 UI 中（本期本就没有）。
 - 凭据状态只暴露"已配置 / 缺失"两种取值（U33）。
 - 导出目录路径等**本机路径只出现在 UI 与本地报告中**，绝不写入兜底文档（U5）。
+- `producer.hostname` 只进 `backup.json`（本机信息，不可单独分享），**不进兜底文档**。
 
 ---
 
@@ -139,6 +156,7 @@ DSH_BRITTLE_BACKUP_GITHUB_TOKEN__<目标id>
 
 - 导入安装插件时优先使用备份里记录的**精确版本** spec。
 - 对 `github:` / `https:` 来源的 git spec，记录并展示 commit 供人工核对。
+- **安装类写入的归属（U37）**：`package.json`、`pnpm-lock.yaml` 与 bundle 启停**只由 `pluginManager`** 写入（`installBundle` / `setBundleEnabled` / `setPluginEnabled`），本插件**不自行合并写**这些文件——参考实现表明 `installBundle` 在失败 / 取消时会自行还原这两个文件，双写会互相破坏。本插件对它们是**只读采集**。
 - `pnpm-workspace.yaml` 的 `allowBuilds` 是**代码执行许可**：还原它等于重新授权安装脚本运行，必须作为需要显式确认的项展示 diff，不静默应用。
 - `link:` / `file:` 绝对路径依赖标记 `unportable`，**不自动安装**（[PROJECT-PLAN.md](PROJECT-PLAN.md) §7-#5）。
 - **不引入原生扩展**：Windows 上无法卸载已加载的 `.node`，会让"卸载 → 重装"变成 EPERM 死锁。
@@ -149,7 +167,8 @@ DSH_BRITTLE_BACKUP_GITHUB_TOKEN__<目标id>
 
 | 项 | 状态 | 说明 |
 |---|---|---|
-| 产物加密 | 不做 | 产物里没有密码 / Token；但**含主机名与模型结构**，因此 JSON 仍需按"可能含你本机信息"对待（文档不含） |
+| 产物加密 | 不做 | 产物里没有密码 / Token；但**含主机名（`producer.hostname`）与模型结构**，因此 JSON 仍需按"可能含你本机信息"对待（文档不含） |
+| 账号名采集 | 不做 | U20 原写"主机名 / 账号名"，现收窄为**只记主机名**：取账号名需要账号服务，且与"不碰登录态"边界冲突（见 [SCOPE-PHASE1.md](SCOPE-PHASE1.md) §3） |
 | 备份会话历史 / storages / attachments / 登录态 | 不做 | 见 §0 的 U19 |
 | 定时 / 自动备份 | 不做 | 见 U18 |
 | 多用户 / 团队共享 | 不做 | 见 U18 |
@@ -165,7 +184,9 @@ DSH_BRITTLE_BACKUP_GITHUB_TOKEN__<目标id>
 | 主题 | 位置 |
 |---|---|
 | 密钥文件名启发式与目录级排除 | `…\dshmarket\lib\backup.js`（`SECRET_FILE_HINTS` / `SKIP_NAMES`）—— 本期仅作**思路参考**，不搬运代码 |
-| 凭据契约（知道哪些字段是密钥） | DSH `settings` 服务（`describe({ redactSecrets: true })` → `secrets[].path`）—— **本期脱敏的唯一依据** |
+| 凭据契约（知道哪些字段是密钥） | DSH `settings` 服务（`describe({ redactSecrets: true })` → `secrets[].path`，**字符串数组**）—— **本期脱敏的唯一依据** |
+| agent 忙碌闸门 | `…\dshmarket\lib\agents.js`（`runningAgentIds`：只把 `status === 'running'` 当忙碌，未知状态 fail-open）—— 本期**思路参考** |
+| 快照 / 回滚 / 原子写思路 | `…\dshmarket\lib\snapshot.js` —— 本期**思路参考**，实现用自己的受限 `node:fs` 路径 |
 | WebDAV SSRF 判定（`isPublicIpv4` / `isPublicIpv6` / `isPublicHostname` / `resolvePublicAddress`） | 🔜 阶段二：`…\dshmarket\lib\backup.js`（`isPublicIpv4` 的 CGNAT 分支写作八位组数学，字面 grep `100.64` 查不到） |
 | MKCOL 建父目录、重定向与凭据不跨源 | 🔜 阶段二：`…\dshmarket\lib\backup.js`（`webdavParentCollections`） |
 | 同源 loopback 校验、重启安全模型与平台探测 | 🔜 阶段二：`…\dshmarket\lib\restart.js`（`trustedRestartRequest` / `trustedDownloadRequest` / `loopbackAuthority` / `restartAllowed` / `detectedSupervisor`） |
@@ -180,3 +201,4 @@ DSH_BRITTLE_BACKUP_GITHUB_TOKEN__<目标id>
 |---|---|
 | 2026-10-01 | 初版：确立不变量、三道脱敏防线、SSRF 双模式、入站路由硬化、远端删除约束（U29）、恢复侧路径安全与"明确不做"清单 |
 | 2026-10-02 | **随阶段一调整**：出站 SSRF、远端删除、重启端点标注为阶段二；防线 ③ 由"上传前"改为"导出前"，并明确它是 `skills\` 内文件的唯一防线；入站新增"导出落点只来自用户显式选择"；新增 skills 目录写入约束；明确本期不含任何网络代码、且以不搬运参考实现代码为目标 |
+| 2026-10-02 | **第二次修订（口径收口）**：§1 第 5/6 条改为"三个可写位置 + 两处自有删除"（U34），新增第 8/9 条（取消即回滚、预览不改盘）；§2.3 补 `RedactedSecret.path` 为字符串数组；§2.4 补自身 entry 导入按同 id 冲突默认保留目标机；§4 第 5 条改为"选择器返回值白名单"并新增第 6 条（状态端点只读）与官方 `connection` 信任闸门待确认项；§6 补 `fs` 能力缺口、`node:fs` 受限例外、`cancelInstall` 语义；§7 补 `hostname` 只进 JSON；§8 新增 U37（安装类写入归属）；§9 把"账号名"列为不采集 |
