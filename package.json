@@ -1,0 +1,65 @@
+{
+  "name": "dsh-brittlebackup",
+  "version": "0.1.0",
+  "description": "DSH 配置 / 插件 / 模型配置 / skills 的本地导出与导入还原插件（阶段一：仅本地，仅中文）",
+  "license": "MIT",
+  "author": "toookamak",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/toookamak/dsh-brittleBackup.git"
+  },
+  "type": "module",
+  "main": "src/index.js",
+  "exports": {
+    ".": "./src/index.js",
+    "./client": "./client/client.js",
+    "./cordis.patch.yml": "./cordis.patch.yml",
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "src",
+    "client",
+    "cordis.patch.yml",
+    "README.md",
+    "LICENSE",
+    "docs"
+  ],
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    },
+    "client": {
+      "inject": [
+        "@deepseek-ai/dsh-client-ui-settings"
+      ],
+      "platform": "web"
+    }
+  },
+  "engines": {
+    "node": "^22.19.0 || >=24.0.0"
+  },
+  "scripts": {
+    "test": "node --test",
+    "check": "node scripts/selfcheck.mjs",
+    "verify": "node scripts/selfcheck.mjs && node --test"
+  },
+  "keywords": [
+    "deepseek",
+    "harness",
+    "dsh",
+    "dsh-plugin",
+    "cordis",
+    "backup",
+    "export",
+    "import"
+  ],
+  "dependencies": {},
+  "peerDependencies": {
+    "@deepseek-ai/cordis": ">=4.0.1 <5.0.0"
+  },
+  "peerDependenciesMeta": {
+    "@deepseek-ai/cordis": {
+      "optional": true
+    }
+  }
+}

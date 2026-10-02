@@ -1,0 +1,5 @@
+# dsh bundle patch: inserts this plugin into a profile's layer stack.
+# 独占 entry id 前缀 `brittle-backup`（UI 半将来用 `brittle-backup-ui`）。
+- insert:
+    - id: brittle-backup
+      name: 'dsh-brittlebackup'

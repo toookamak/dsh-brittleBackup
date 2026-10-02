@@ -4,11 +4,51 @@ DSH（DeepSeek Harness）的**配置 / 插件 / 模型配置**本地导出与导
 
 远端传输（WebDAV / GitHub）与一键重启为**阶段二**，本期不做。
 
-> ## 当前状态：设计阶段，尚未实现
+> ## 当前状态：M0–M4 已实现，等你装进 DSH 验证（M5）
 >
-> 仓库里目前**只有文档**，没有可安装的插件。**阶段一范围已冻结**（2026-10-02，见 [SCOPE-PHASE1.md](docs/SCOPE-PHASE1.md)），代码尚未开始。
+> **阶段一范围已冻结**（2026-10-02，见 [SCOPE-PHASE1.md](docs/SCOPE-PHASE1.md)）；同日**第二次修订补齐实现契约**（服务签名 / 路由 / 客户端半 / 回滚策略，见 [PROJECT-PLAN.md](docs/PROJECT-PLAN.md) §17）。
 >
-> 不要尝试安装——`package.json` 与 `src/` 都还不存在。
+> 已完成 **M0 骨架 + M1 采集与产物 + M2 导入还原 + M3 兜底文档定稿 + M4 设置页 UI**：宿主半与客户端半都是**纯手写 ESM、零依赖、零构建**。
+>
+> 验证方式：`npm run verify`（语法/打包契约自检 + 95 个 `node --test` 断言，含客户端半的宿主侧仿真与**走本机路由的端到端**用例）。**真实 DSH 里的加载与卸载尚未验证** —— 那正是留给你的 M5（安装步骤见下文）。
+
+---
+
+## 安装到 DSH（本地路径）
+
+本插件还没发布到 npm，所以用**本地路径**安装（DSH Desktop）：
+
+1. 打开 **设置 → 插件**（插件管理器），在安装输入框里填本仓库的绝对路径，例如 `F:\Git\dsh-brittleBackup`。
+2. 安装会往当前 profile 的依赖里加一条 `dsh-brittlebackup`，**需要重启 DSH** 才生效。
+3. 重启后打开 **设置 → 兜底备份**，应能看到三个面板：导出 / 导入 / 任务进度。
+
+> 本机 `dsh` 不在 PATH 上（桌面版由宿主启动），所以别用命令行 `dsh plugin add`；走插件管理器里的安装入口。
+
+**验证清单（M5，装好后逐条打勾）**
+
+- [ ] 设置页出现「兜底备份」，顶部显示服务探测（configEditor / pluginManager / credentials / skills）。
+- [ ] 选一个空目录 → 勾选项 → 开始导出 → 产物里有 `backup.json` + `兜底文档.md`（勾了 skills 文件还会有 `skills\`）。
+- [ ] `node scripts/doc-audit.mjs "<产物目录>"` 打印「盲测检查通过」。
+- [ ] 预览一份产物（只读）→ 14 项检查与导入计划出现 → 勾选 → 开始导入 → 报告含成功 / 失败 / 需手工 / 需补 key。
+- [ ] 导入中途点「取消」→ 报告显示已回滚；`<DSH_HOME>\dsh-brittle-backup\snapshots\` 里有本次快照。
+- [ ] 卸载插件后 profile 无残留（本插件**不写** profile 配置，`cordis.patch.yml` 里只有它自己的一个 insert 条目）。
+
+**出问题先看这里**
+
+- 设置页没出现：确认 DSH 已重启，且 `package.json` 里的 `dsh.client` / `exports["./client"]` 没被改动。
+- 提示「服务不可用 / 降级」：宿主缺 `configEditor` 或 `settings` 时配置条目不自动还原，其余功能照常（见 [SCOPE-PHASE1.md](docs/SCOPE-PHASE1.md) §4.2）。
+- 路由返回 403：请用 `http://127.0.0.1:<端口>` 打开（同源 + loopback 是硬要求）。
+
+---
+
+## 常用命令
+
+```powershell
+npm run verify                       # 自检（语法 + 打包契约 + 无网络代码）+ 95 个 node:test 断言
+npm run check                        # 只跑自检
+npm test                             # 只跑测试
+node scripts/doc-audit.mjs "<产物目录>"   # 审计一份产物的兜底文档（S4 盲测的自动化部分）
+```
 
 ---
 
@@ -21,7 +61,7 @@ DSH（DeepSeek Harness）的**配置 / 插件 / 模型配置**本地导出与导
 | **导出备份** | 把配置、插件清单、模型配置、skills 导出成**一个目录**（写到用户自选位置），内容**逐项可勾选** |
 | **导入还原** | 从该目录导入还原；**导入前做完整兼容性验证**（14 项），再预览 diff、逐项勾选、合并写入、失败回滚 |
 
-**官方能力优先、尽量少写代码**：配置读写走宿主的 `settings` / `configEditor` 服务，不自己解析 YAML；产物是普通目录，不做压缩。目标是在阶段一**不搬运任何参考实现的代码**，把 DSH 升级导致的兼容风险压到最低。
+**官方能力优先、尽量少写代码**：配置读写走宿主的 `settings` / `configEditor` 服务，不自己解析 YAML；产物是普通目录，不做压缩。唯一例外是**文件系统操作**——宿主 `fs` 服务没有删除 / 建目录 / 写二进制原语，快照与回滚、skills 目录树复制因此用**受限 `node:fs`**（三处范围见 [SCOPE-PHASE1.md](docs/SCOPE-PHASE1.md) §4.6）。目标是在阶段一**不搬运任何参考实现的代码**，把 DSH 升级导致的兼容风险压到最低。
 
 ---
 
@@ -46,7 +86,7 @@ DSH 生态里已有的备份能力（以 MIT 许可的 **dsh-market** 为代表�
 | 文档 | 内容 |
 |---|---|
 | [docs/SCOPE-PHASE1.md](docs/SCOPE-PHASE1.md) | **阶段一的权威范围**：做什么、不做什么、对产品边界的修订、技术取舍与验收清单 |
-| [docs/PROJECT-PLAN.md](docs/PROJECT-PLAN.md) | 完整项目方案。**§0 是产品边界的唯一权威来源**（U1–U33 + D1–D7），**§0.0** 是本期的冻结范围 |
+| [docs/PROJECT-PLAN.md](docs/PROJECT-PLAN.md) | 完整项目方案。**§0 是产品边界的唯一权威来源**（U1–U37 + D1–D7），**§0.0** 是本期的冻结范围，**§17 是实现契约**（服务签名 / 路由接口 / 客户端半 / 回滚策略 / 采集口径 / 里程碑 / 待确认项） |
 | [docs/FORMAT.md](docs/FORMAT.md) | 备份产物的**对外契约**：目录结构、`backup.json` 结构、脱敏寻址、skills 目录、上限 |
 | [docs/SECURITY.md](docs/SECURITY.md) | 密钥策略、脱敏三道防线、入站路由硬化、导入路径安全 |
 
@@ -62,13 +102,17 @@ DSH 生态里已有的备份能力（以 MIT 许可的 **dsh-market** 为代表�
 | 导出可选项 | profile 配置 / 插件清单 / 模型配置 / skills 清单 / skills 文件 / 兜底文档，逐项可关 |
 | 导入入口 | **只从本地目录**（不含远端下载与剪贴板粘贴） |
 | 导入验证 | **§7 全 14 项兼容性验证**，逐项给出 可自动恢复 / 有风险 / 只能手工 |
-| 配置处理 | 走官方 `settings` / `configEditor`；**放弃保留注释与行顺序**，按条目 `id` 合并 |
-| skills | 清单默认包含；文件需显式勾选，落地为 `skills\` 子目录（**不用 zip**） |
+| 导入取消 | 提供「取消」：停止剩余项 + 回滚已写入项；导出不可取消 |
+| 配置处理 | 走官方 `settings` / `configEditor`；**放弃保留注释与行顺序**，按条目 `id` 合并（只收录有 override 的条目） |
+| skills | 清单默认包含；文件需显式勾选，落地为 `skills\` 子目录（**不用 zip**，逐字节含二进制） |
+| 文件操作 | 快照目录 / 用户选定导出目录 / `<DSH_HOME>\skills` 三处用**受限 `node:fs`**（宿主 `fs` 服务没有删除 / 建目录 / 写二进制原语） |
 | 兜底文档 | **自包含、可单独分享**，不含配置原文、主机信息与本机路径 |
 | 重启 | 导入完成后**只提示**需要重启，不自动重启 |
 | 密钥 | 永不读取值、永不写入产物；脱敏以 `settings.describe({ redactSecrets: true })` 为权威依据 |
+| 安装类写入 | `package.json` / `pnpm-lock.yaml` / bundle 启停由 `pluginManager` 独占，本插件只读采集 |
+| 自身设置 | 存 `<DSH_HOME>\dsh-brittle-backup\settings.json`，**不写 profile 配置**（避免本机路径被备份带走，也避免为一个偏好项引静态依赖） |
 | Agent | **不能**触发导出或导入，只能人工操作 |
-| 明确不做 | 远端传输、一键重启、双语、定时自动备份、增量与云同步、多用户共享、产物加密 |
+| 明确不做 | 远端传输、一键重启、双语、定时自动备份、增量与云同步、多用户共享、产物加密、账号名采集 |
 
 完整条目见 [SCOPE-PHASE1.md](docs/SCOPE-PHASE1.md) 与 [PROJECT-PLAN.md](docs/PROJECT-PLAN.md) §0.0。
 
@@ -96,12 +140,22 @@ DSH 生态里已有的备份能力（以 MIT 许可的 **dsh-market** 为代表�
 dsh-BrittleBackup/
 ├─ README.md             # ✅
 ├─ LICENSE               # ✅ MIT
+├─ package.json          # ✅ 零依赖；main = src/index.js
+├─ cordis.patch.yml      # ✅ insert: id = brittle-backup
 ├─ docs/                 # ✅ 方案 / 阶段一范围 / 格式契约 / 安全策略
-├─ package.json          # ⏳ 待创建
-├─ cordis.patch.yml      # ⏳ 待创建
-├─ src/                  # ⏳ 采集 / 脱敏 / 文档 / 导出 / 导入 / 快照
-├─ client/               # ⏳ 设置页 UI
-└─ test/                 # ⏳ 单元 + 集成 + fixtures
+├─ scripts/
+│   ├─ selfcheck.mjs     # ✅ 语法 + 打包契约 + 无网络代码断言
+│   └─ doc-audit.mjs     # ✅ 兜底文档审计（S4 盲测自动化）
+├─ src/
+│   ├─ index.js          # 插件入口（name + apply，只挂路由）
+│   ├─ routes.js         # 本机 HTTP 路由 + loopback/同源/白名单硬化
+│   ├─ paths.js  log.js  nodefs.js  services.js  settings.js  task.js
+│   ├─ redact.js  doc.js  artifact.js  export.js  credentials.js  semver.js  diff.js
+│   ├─ collect/          # profile 条目 / 插件清单 / 模型 / skills + 总编排
+│   └─ restore/          # host 现状 / 14 项检查 / 计划 diff / 快照回滚 / 应用 / 编排
+├─ client/
+│   └─ client.js         # ✅ 设置页 UI（手写、零构建的 __ModuleLoader__ bundle）
+├─ test/                 # ✅ node:test（单元 + 端到端 + 路由硬化 + 客户端半仿真）
 ```
 
 ---
