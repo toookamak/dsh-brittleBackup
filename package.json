@@ -1,6 +1,6 @@
 {
   "name": "dsh-brittlebackup",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "DSH 配置 / 插件 / 模型配置 / skills 的本地导出与导入还原插件（阶段一：仅本地，仅中文）",
   "license": "MIT",
   "author": "toookamak",

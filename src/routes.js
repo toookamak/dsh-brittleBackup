@@ -65,11 +65,45 @@ function hostIsLoopback(hostHeader) {
   return LOOPBACK_NAMES.has(withoutPort.toLowerCase())
 }
 
+function headerContains(request, name, needle) {
+  const value = request.headers?.[name]
+  return typeof value === 'string' && value.toLowerCase().includes(needle)
+}
+
+/**
+ * "这条请求看起来是我们自己的页面发的吗"：只要有 JSON 的 content-type 或 accept 之一即可。
+ * 容忍宿主/Electron 的 fetch 包装只保留其中一个头的情况。
+ */
+function looksLikePageRequest(request) {
+  return headerContains(request, 'content-type', 'application/json') || headerContains(request, 'accept', 'application/json')
+}
+
+/**
+ * 同源判定（2026-10-02 修订）。
+ *
+ * 真正的 CSRF 防护是**"带 Origin 时必须同源"**，而不是"必须带 Origin"：
+ * 浏览器对跨源 POST 一定会带 Origin，所以少了这一条不会放过攻击者；
+ * 反过来，同一个页面在 Electron / 被宿主 fetch 包装 的情况下**可能不带 Origin**，
+ * 硬要求它只会把用户自己挡在外面（实测：填本地路径时被 403「缺少 Origin」挡住）。
+ *
+ * 因此：
+ *   - `Host` 必须是 loopback（防 DNS rebinding）；
+ *   - `Origin` **存在**时必须能解析、必须与 Host 同源、必须也是 loopback；`Origin: null`
+ *     （file:// / 沙箱 iframe 之类的不透明来源）一律拒绝；
+ *   - `Origin` 缺失时放行，但要求请求"看起来像页面请求"（JSON 的 content-type 或 accept）。
+ *     我们自己发的请求永远满足；而浏览器不会给跨源请求去掉 Origin，所以这条不构成新的放行面。
+ */
 function sameOrigin(request) {
   const host = request.headers?.host
   const origin = request.headers?.origin
   if (!hostIsLoopback(host)) return { ok: false, reason: 'Host 不是 loopback（防 rebinding）' }
-  if (typeof origin !== 'string' || origin === '') return { ok: false, reason: '缺少 Origin，拒绝同源判定' }
+  if (origin === undefined || origin === null || origin === '') {
+    if (!looksLikePageRequest(request)) {
+      return { ok: false, reason: '没有 Origin 时必须带 JSON 的 content-type 或 accept' }
+    }
+    return { ok: true, originAbsent: true }
+  }
+  if (typeof origin !== 'string' || origin === 'null') return { ok: false, reason: `Origin 是不透明来源：${String(origin)}` }
   try {
     const parsed = new URL(origin)
     if (parsed.host !== host) return { ok: false, reason: 'Origin 与 Host 不同源' }
@@ -173,6 +207,9 @@ export function mountRoutes({ ctx, tasks, logger, env = process.env }) {
       if (method !== 'GET') {
         const origin = sameOrigin(request)
         if (!origin.ok) return sendError(response, 403, 'BAD_ORIGIN', origin.reason)
+        if (origin.originAbsent === true) {
+          logger?.once?.('origin-absent', 'info', `${suffix}：请求没有 Origin（宿主 fetch 包装 / Electron 常见），已按"页面请求"放行`)
+        }
       } else if (!hostIsLoopback(request.headers?.host)) {
         return sendError(response, 403, 'BAD_HOST', 'Host 不是 loopback')
       }

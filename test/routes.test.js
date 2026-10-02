@@ -73,7 +73,7 @@ test('路由：五个端点都按 exact 注册', async () => {
   assert.equal(routes.every(route => route.kind === 'exact'), true)
 })
 
-test('路由硬化：非 loopback / 转发头 / 跨源 / 缺 Origin 一律拒绝', async () => {
+test('路由硬化：非 loopback / 转发头 / 跨源 / 不透明 Origin 一律拒绝', async () => {
   const { call } = await setup()
 
   const remote = await call('/state', { method: 'GET', headers: { host: '127.0.0.1:19387' }, remoteAddress: '10.0.0.5' })
@@ -84,17 +84,35 @@ test('路由硬化：非 loopback / 转发头 / 跨源 / 缺 Origin 一律拒绝
   assert.equal(forwarded.statusCode, 403)
   assert.equal(JSON.parse(forwarded.body).error.code, 'FORWARDED_HEADER')
 
-  const noOrigin = await call('/export', { method: 'POST', headers: { host: '127.0.0.1:19387' }, body: {} })
-  assert.equal(noOrigin.statusCode, 403)
-  assert.equal(JSON.parse(noOrigin.body).error.code, 'BAD_ORIGIN')
-
-  const crossOrigin = await call('/export', { method: 'POST', headers: { host: '127.0.0.1:19387', origin: 'http://evil.example' }, body: {} })
+  const crossOrigin = await call('/export', { method: 'POST', headers: { host: '127.0.0.1:19387', origin: 'http://evil.example', 'content-type': 'application/json' }, body: {} })
   assert.equal(crossOrigin.statusCode, 403)
   assert.equal(JSON.parse(crossOrigin.body).error.code, 'BAD_ORIGIN')
+
+  const opaque = await call('/export', { method: 'POST', headers: { host: '127.0.0.1:19387', origin: 'null', 'content-type': 'application/json' }, body: {} })
+  assert.equal(opaque.statusCode, 403)
+  assert.equal(JSON.parse(opaque.body).error.code, 'BAD_ORIGIN')
 
   const badHost = await call('/state', { method: 'GET', headers: { host: 'rebind.example' } })
   assert.equal(badHost.statusCode, 403)
   assert.equal(JSON.parse(badHost.body).error.code, 'BAD_HOST')
+})
+
+test('路由：没有 Origin 时按"页面请求"放行（宿主 fetch 包装 / Electron 的常见形态）', async () => {
+  const { call, host } = await setup()
+
+  // 带 JSON content-type（我们的客户端就是这么发的）
+  const withContentType = await call('/pick', { method: 'POST', headers: { host: '127.0.0.1:19387', 'content-type': 'application/json' }, body: { path: host.root } })
+  assert.equal(withContentType.statusCode, 200, JSON.stringify(withContentType.body))
+
+  // 只带 accept: application/json（宿主包装可能把 content-type 吃掉）
+  const withAcceptOnly = await call('/pick', { method: 'POST', headers: { host: '127.0.0.1:19387', accept: 'application/json' }, body: { path: host.root } })
+  assert.equal(withAcceptOnly.statusCode, 200, JSON.stringify(withAcceptOnly.body))
+
+  // 两个都没有 → 拒绝
+  const bare = await call('/pick', { method: 'POST', headers: { host: '127.0.0.1:19387' }, body: { path: host.root } })
+  assert.equal(bare.statusCode, 403)
+  assert.equal(JSON.parse(bare.body).error.code, 'BAD_ORIGIN')
+  assert.ok(JSON.parse(bare.body).error.message.includes('Origin'))
 })
 
 test('路由：GET /state 无副作用，返回服务探测与任务视图', async () => {
