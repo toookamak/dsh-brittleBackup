@@ -1012,6 +1012,8 @@ window.__ModuleLoader__.load({ id: '<npm 包名>', factory: (require) => { /* �
 | 导入来源 | 目录自身含 `backup.json` → 用它；否则在直接子目录里找匹配 `dsh-brittle-backup-*` 且含 `backup.json` 的候选：1 个直接用，多个列出让用户选，0 个报错并说明期望结构 |
 | 本插件自身 entry | 随配置导出（它可能含"上次导出目录"这类本机路径）；导入时按同 id 冲突（§7-#12）**默认保留目标机当前值** |
 | `absent[]` | 只在报告中展示，**永不触发删除** |
+| 勾选通道 `selection`（2026-10-03 定稿） | `{ overrides: { [planId]: boolean }, overwriteSkills: [name], overwritePlugins: [name], ackBuildScripts: boolean }`。`overrides` 是**三态**：键缺省 = 听计划默认值（UI 复选框直接回显计划里的 `selected`），显式 `true` / `false` = 用户改过。**必须有 `overrides`**：单靠"取消勾选"一个通道无法实现 §7-#12 的"默认保留目标机、勾选才覆盖"—— 默认关闭的项需要一条能把它重新打开的路 |
+| 拦截级检查的落地 | §7 里 `level: "block"` 的**条目级**结论（路径安全 / peer 不兼容 / entry id 撞车）必须真的拦住写入：`runChecks` 输出的 `blockedItems[].target = { kind, ref }` 由 `buildPlan` 消费，命中的计划项降级为 `manual` + `selected: false`，`writeTargets()` 自然不再带上它（条目仍留在计划表里，让用户看到"为什么只能手工"）。只有 `scope: "global"` 的拦截才整体拒绝执行 |
 | skills 扫描回退 | `skills` 服务缺失 → 直接扫 `<DSH_HOME>\skills`（user 级） |
 | 导出重名 | 目标目录已存在（同秒）→ 派生 `-2`、`-3` 后缀 |
 | spec → 来源类型 | `link:`/`file:` → local-path（绝对路径标 `unportable`）、`github:`/`git+*`/`http(s):` → github、`npm:` → registry、其余协议 → unknown，**裸 semver / 范围（`^1.66.7`）→ registry** |
@@ -1049,7 +1051,7 @@ window.__ModuleLoader__.load({ id: '<npm 包名>', factory: (require) => { /* �
 | 完整性检查 | ✅ | `test/integrity.test.js`：`src/` 无孤儿模块、不引用 test/scripts、`client/` 不相对引用宿主半、`package.json` 引用路径都存在且被 `files` 覆盖、README 链接的 docs 都存在、文档状态与仓库一致 |
 | **尚未验证** | ⏳ | ① **真实 DSH 里的加载、设置页显示、卸载无残留**（需要你在 DSH 里装一次）；② 人工盲测（脚本已覆盖可自动化的部分） |
 
-运行方式：`npm run verify`（= `scripts/selfcheck.mjs` + `node --test`，当前 45 个 JS 文件、95 个断言全绿，且自检里含"打包 / 装载契约"断言）；`npm pack --dry-run` 已确认发布产物含 `src/`、`client/`、`cordis.patch.yml`。审计某份产物：`node scripts/doc-audit.mjs <产物目录>`。
+运行方式：`npm run verify`（= `scripts/selfcheck.mjs` + `node --test`，当前 56 个 JS 文件、147 个断言全绿，且自检里含"打包 / 装载契约"断言）；`npm pack --dry-run` 已确认发布产物含 `src/`、`client/`、`cordis.patch.yml`。审计某份产物：`node scripts/doc-audit.mjs <产物目录>`。
 
 ---
 

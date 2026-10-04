@@ -40,14 +40,16 @@ export function collectConfigEntries(configuration, { secretMap } = {}) {
     const inherited = isNonEmptyObject(record?.inherited) ? record.inherited : {}
     const secretPointers = secretPointersForEntry(secretMap, id)
     const { value, redactions } = stripSecrets(override, { secretPointers, prefix: '/override' })
+    // 宿主默认值（inherited）同样可能内联密钥，必须走同一条剥离路径；指针前缀用 /inherited 区分。
+    const strippedInherited = stripSecrets(inherited, { secretPointers, prefix: '/inherited' })
     const hostSecrets = secretMap?.entries?.get(id) ?? secretMap?.entries?.get(id.replace(/^include:/, '')) ?? []
     entries.push({
       id,
       name: typeof entry?.name === 'string' ? entry.name : '',
       override: value,
-      inherited,
+      inherited: strippedInherited.value,
       secrets: hostSecrets.map(item => ({ path: [...item.path], set: item.set === true })),
-      redactions,
+      redactions: [...redactions, ...strippedInherited.redactions],
     })
   }
   entries.sort((a, b) => a.id.localeCompare(b.id))

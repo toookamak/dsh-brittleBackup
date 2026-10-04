@@ -131,3 +131,31 @@ export function resolveArtifactPath(root, relativePath) {
   assertWithin(root, target, '产物路径')
   return target
 }
+
+/** Windows 保留字符：出现在目录名里会出问题（`:` 还兼作盘符与 NTFS 数据流分隔符）。 */
+const WINDOWS_RESERVED = /[:*?"<>|]/
+/** 控制字符（含 NUL）。 */
+const CONTROL_CHARS = /[\u0000-\u001f\u007f]/
+
+/**
+ * **单段名**合法性：skill 名、插件名这类"是名字、不是路径"的值。
+ *
+ * 这是 `checkArtifactPath` 挡不住的另一种形态 —— 一个**只含一个段**的相对路径
+ * （比如 `..`）完全符合 checkArtifactPath 之外的所有直觉，但一旦被 `join(root, name)`
+ * 拿去拼路径就会越出 root。所以凡是要参与路径拼接的名字，都必须过这一关。
+ *
+ * 故意**不限制字符集**：中文 / emoji 的 skill 名是合法的，只卡结构与 Windows 保留字符。
+ *
+ * @returns `{ok: true, name} | {ok: false, reason}`
+ */
+export function checkNameSegment(value, { maxLength = 128 } = {}) {
+  if (typeof value !== 'string' || value === '') return { ok: false, reason: '不是非空字符串' }
+  if (value !== value.trim()) return { ok: false, reason: '首尾有空白' }
+  if ([...value].length > maxLength) return { ok: false, reason: `超过 ${maxLength} 个字符` }
+  if (value === '.' || value === '..') return { ok: false, reason: '是 "." 或 ".."' }
+  if (value.includes('/') || value.includes('\\')) return { ok: false, reason: '含路径分隔符' }
+  if (CONTROL_CHARS.test(value)) return { ok: false, reason: '含控制字符或 NUL' }
+  if (WINDOWS_RESERVED.test(value)) return { ok: false, reason: '含 Windows 保留字符' }
+  if (value.endsWith('.')) return { ok: false, reason: '以 "." 结尾（Windows 会静默去掉）' }
+  return { ok: true, name: value }
+}

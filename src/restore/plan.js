@@ -28,14 +28,29 @@ function item({ kind, ref, action, level, reason, selected, requiresConfirm = fa
 
 /**
  * @param selection 用户勾选结果：
- *   `{ off: { [planId]: true }, overwriteSkills: [name], overwritePlugins: [name], ackBuildScripts: boolean }`
+ *   `{ overrides: { [planId]: boolean }, off: { [planId]: true }, overwriteSkills: [name], overwritePlugins: [name], ackBuildScripts: boolean }`
+ *   `overrides` 是**三态**通道：缺省 = 听计划默认值（UI 的复选框直接回显计划里的 `selected`），
+ *   显式 true/false = 用户改过。`off` 保留是为了兼容旧调用方。
  */
 export function buildPlan({ artifact, host, checks = null, selection = null } = {}) {
   const off = selection?.off ?? {}
+  const overrides = selection?.overrides ?? {}
   const overwriteSkills = new Set(selection?.overwriteSkills ?? [])
   const overwritePlugins = new Set(selection?.overwritePlugins ?? [])
   const items = artifact.items
   const plan = []
+
+  /**
+   * 三态勾选：用户没动过就听默认的（`defaultSelected`），动过就听用户的。
+   *
+   * 之前只有 `off` 一个通道，只能表达"取消勾选"，没法表达"把默认关掉的项重新打开"
+   * —— 也就是没法实现契约里那句"默认保留目标机，勾选才覆盖"。
+   */
+  const selectedByUser = (kind, ref, defaultSelected) => {
+    const explicit = overrides[planId(kind, ref)]
+    if (typeof explicit === 'boolean') return explicit
+    return defaultSelected ? !off[planId(kind, ref)] : false
+  }
 
   // ---- 配置条目 ----
   for (const entry of items.config.entries) {
@@ -52,7 +67,10 @@ export function buildPlan({ artifact, host, checks = null, selection = null } = 
     const same = deepEqual(live.override, entry.override)
     plan.push(item({
       kind: 'config', ref: entry.id, action: 'merge', level: same ? 'info' : 'warn',
-      selected: !off[planId('config', entry.id)],
+      // 值不同的时候**默认不写**：FORMAT.md §2 与 PROJECT-PLAN §7 都要求"默认保留目标机"，
+      // 用户显式勾选（selection.overrides）才覆盖。之前这里恒为 true，
+      // 界面却写着"默认保留目标机，勾选才覆盖" —— 文案和行为是反的。
+      selected: selectedByUser('config', entry.id, same),
       reason: same ? '与目标机一致（仍会按合并语义写一遍）' : '同 id 条目值不同：默认保留目标机，勾选才覆盖',
       diff: diffObjects(live.override, entry.override).slice(0, 20),
     }))
@@ -65,7 +83,7 @@ export function buildPlan({ artifact, host, checks = null, selection = null } = 
       kind: 'file', ref: 'pnpm-workspace.yaml',
       action: selection?.ackBuildScripts === true ? 'write' : 'confirm',
       level: 'warn',
-      selected: selection?.ackBuildScripts === true && !off[planId('file', 'pnpm-workspace.yaml')],
+      selected: selection?.ackBuildScripts === true && selectedByUser('file', 'pnpm-workspace.yaml', true),
       requiresConfirm: true,
       reason: 'allowBuilds 是代码执行许可：还原它等于重新授权安装脚本运行，必须显式确认',
       diff: [],
@@ -94,7 +112,7 @@ export function buildPlan({ artifact, host, checks = null, selection = null } = 
     if (!installed || !installed.installed) {
       plan.push(item({
         kind: 'plugin', ref: plugin.name, action: 'install', level: 'info',
-        selected: !off[planId('plugin', plugin.name)],
+        selected: selectedByUser('plugin', plugin.name, true),
         reason: `目标机未安装，将执行 ${plugin.installCommand}`,
         detail: plugin.spec,
       }))
@@ -104,7 +122,7 @@ export function buildPlan({ artifact, host, checks = null, selection = null } = 
       const overwrite = overwritePlugins.has(plugin.name)
       plan.push(item({
         kind: 'plugin', ref: plugin.name, action: overwrite ? 'install' : 'keep', level: 'warn',
-        selected: overwrite && !off[planId('plugin', plugin.name)],
+        selected: overwrite && selectedByUser('plugin', plugin.name, true),
         reason: `目标机 ${installed.version}，备份 ${plugin.resolvedVersion}；默认保留目标机`,
         detail: plugin.spec,
       }))
@@ -114,7 +132,7 @@ export function buildPlan({ artifact, host, checks = null, selection = null } = 
     if (plugin.enabled === false && currentEnabled) {
       plan.push(item({
         kind: 'plugin', ref: plugin.name, action: 'disable', level: 'warn',
-        selected: !off[planId('plugin', plugin.name)],
+        selected: selectedByUser('plugin', plugin.name, true),
         reason: '备份时该插件处于禁用状态，目标机是启用的 → 需要禁用',
       }))
       continue
@@ -122,7 +140,7 @@ export function buildPlan({ artifact, host, checks = null, selection = null } = 
     if (plugin.enabled !== false && !currentEnabled) {
       plan.push(item({
         kind: 'plugin', ref: plugin.name, action: 'enable', level: 'info',
-        selected: !off[planId('plugin', plugin.name)],
+        selected: selectedByUser('plugin', plugin.name, true),
         reason: '备份时该插件是启用的，目标机是禁用的 → 需要启用',
       }))
       continue
@@ -148,7 +166,7 @@ export function buildPlan({ artifact, host, checks = null, selection = null } = 
     plan.push(item({
       kind: 'skill', ref: skill.name, action: 'copy',
       level: exists && !overwrite ? 'warn' : 'info',
-      selected: exists && !overwrite ? false : !off[planId('skill', skill.name)],
+      selected: exists && !overwrite ? false : selectedByUser('skill', skill.name, true),
       reason: exists
         ? (overwrite ? '目标机已有同名 skill：按你的选择覆盖' : '目标机已有同名 skill：默认跳过，勾选"覆盖"才写')
         : `写入 <DSH_HOME>\\skills\\${skill.name}\\（${skill.files} 个文件）`,
@@ -162,6 +180,31 @@ export function buildPlan({ artifact, host, checks = null, selection = null } = 
       kind: 'credential', ref: name, action: 'report', level: 'info', selected: false,
       reason: `状态：${credentialStates[name] ?? 'unknown'}（永不读值、永不写入产物）`,
     }))
+  }
+
+  // ---- 拦截级检查项真正生效（PROJECT-PLAN §7）----
+  //
+  // 之前 `runChecks` 判出 `verdict: 'blocked'` 之后**没有任何人消费** `blockedItems`，
+  // 所以"路径安全 / peer 不兼容 / entry id 撞车"这些拦截级结论对写入毫无约束力。
+  // 这里把命中的计划项降级成 `manual` 并强制取消勾选：
+  //   - `writeTargets()` 自然不再带上它（它只收 merge/write/install/enable/disable/copy）；
+  //   - 条目仍然留在计划表里，用户能看到"为什么这条只能手工"，而不是凭空少一项。
+  const blockedReasons = new Map()
+  for (const blocked of checks?.blockedItems ?? []) {
+    const target = blocked?.target
+    if (target?.kind === undefined || target?.ref === undefined) continue
+    const id = planId(String(target.kind), String(target.ref))
+    if (!blockedReasons.has(id)) blockedReasons.set(id, blocked.reason ?? '被拦截级检查项命中')
+  }
+  for (const entry of plan) {
+    const reason = blockedReasons.get(entry.id)
+    if (reason === undefined) continue
+    entry.blockedBy = reason
+    entry.action = 'manual'
+    entry.level = 'block'
+    entry.requiresConfirm = false
+    entry.selected = false
+    entry.reason = `被拦截级检查项拦下，不能自动写入（${reason}）`
   }
 
   return plan

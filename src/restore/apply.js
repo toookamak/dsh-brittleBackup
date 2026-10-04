@@ -6,7 +6,7 @@
  * 回滚不完整必须显式列出残留（U21 / U35）。
  */
 import { join } from 'node:path'
-import { SNAPSHOT_KEEP, profileDir, skillsRoot } from '../paths.js'
+import { SKILLS_DIRNAME, SNAPSHOT_KEEP, assertWithin, checkNameSegment, profileDir, skillsRoot } from '../paths.js'
 import { hasMethod, service } from '../services.js'
 import { copyTree, pathExists, removeTree, writeTextAtomic } from '../nodefs.js'
 import { mergeDeep } from '../diff.js'
@@ -191,10 +191,24 @@ export async function applyPlan({
 
     // ---- 4. skills：只处理勾选了文件、且被选中的 ----
     task?.setPhase?.('apply', '正在写入 skills', 80)
+    const targetRoot = skillsRoot(env)
     for (const item of skillItems) {
       task?.throwIfCanceled?.()
-      const source = join(artifactDir, 'skills', item.ref)
-      const destination = join(skillsRoot(env), item.ref)
+      // 纵深防御：产物校验（artifact.js）已经拒绝非法的 skill 名，但**删除**动作
+      // 绝不能只依赖上游。名字一旦能越出 skillsRoot，`removeTree` 就会把整个
+      // <DSH_HOME> 连同所有 profile 配置一起删掉，且不回滚。
+      let source
+      let destination
+      try {
+        const nameChecked = checkNameSegment(item.ref)
+        if (!nameChecked.ok) throw new Error(`skill 名称不安全：${nameChecked.reason}`)
+        source = assertWithin(artifactDir, join(artifactDir, SKILLS_DIRNAME, item.ref), 'skill 来源')
+        destination = assertWithin(targetRoot, join(targetRoot, item.ref), 'skill 写入目标')
+      } catch (error) {
+        report.failed.push({ kind: 'skill', ref: item.ref, reason: error?.message ?? String(error) })
+        reportProgress()
+        continue
+      }
       try {
         if (!(await pathExists(source))) {
           report.failed.push({ kind: 'skill', ref: item.ref, reason: '产物里没有 skills\\' + item.ref + ' 目录' })

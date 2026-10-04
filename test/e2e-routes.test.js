@@ -128,7 +128,7 @@ test('端到端（走路由）：导出（默认压成 zip）→ 预览 → 导�
 
   // ③ 选来源（白名单一次性，所以再登记一次）→ 导入
   assert.equal((await call('/pick', { method: 'POST', headers, body: { path: exportRoot } })).status, 200)
-  const importStart = await call('/import', { method: 'POST', headers, body: { sourceDir: exportRoot, selection: { ackBuildScripts: true, overwriteSkills: ['skill-a'] } } })
+  const importStart = await call('/import', { method: 'POST', headers, body: { sourceDir: exportRoot, selection: { ackBuildScripts: true, overwriteSkills: ['skill-a'], overrides: { 'config:llm-pi-ai': true } } } })
   assert.equal(importStart.status, 202)
   const importTask = await waitForTask()
   assert.equal(importTask.error, null, JSON.stringify(importTask.error))

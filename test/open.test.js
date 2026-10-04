@@ -7,9 +7,11 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import { join } from 'node:path'
+import { writeFile } from 'node:fs/promises'
 import { openInFileManager, resolveOpenCommand } from '../src/open.js'
 import { mountRoutes, ROUTE_PREFIX } from '../src/routes.js'
 import { TaskRegistry } from '../src/task.js'
+import { ensureDir } from '../src/nodefs.js'
 import { makeFakeHost } from './helpers/fake-host.js'
 
 function makeRequest({ method = 'POST', headers = {}, body = null, remoteAddress = '127.0.0.1' } = {}) {
@@ -114,6 +116,47 @@ test('路由 /open：只接受存在的绝对目录，并把真实路径交给�
   assert.equal(relative.status, 400)
 
   assert.equal(opened.length, 1, '被拒的请求不能触发打开动作')
+})
+
+test('路由 /open：选中的是文件 → 打开它所在的目录（配合客户端「选择 ZIP…」）', async () => {
+  // 客户端 pickZip() 把 zip **文件**路径写进同一个输入框，「打开备份路径」照旧可点，
+  // 提示语承诺"打开来源目录或 zip 所在位置" —— 服务端要认这个语义。
+  const { host, call, opened } = await setupOpen()
+  const sub = join(host.root, 'chosen')
+  await ensureDir(sub)
+  const zipPath = join(sub, 'backup.zip')
+  await writeFile(zipPath, 'PK', 'binary')
+
+  const ok = await call('/open', { headers: ORIGIN, body: { path: zipPath } })
+  assert.equal(ok.status, 200, JSON.stringify(ok.payload))
+  assert.equal(ok.payload.opened, true)
+  assert.deepEqual(opened, [sub], '交给打开函数的必须是文件所在的目录')
+
+  // 目录的既有行为不变。
+  const dir = await call('/open', { headers: ORIGIN, body: { path: host.root } })
+  assert.equal(dir.status, 200, JSON.stringify(dir.payload))
+  assert.deepEqual(opened, [sub, host.root])
+})
+
+test('路由 /open：拒绝时给出准确原因，且不触发打开动作', async () => {
+  const { host, call, opened } = await setupOpen()
+
+  const missing = await call('/open', { headers: ORIGIN, body: { path: join(host.root, 'nope') } })
+  assert.equal(missing.status, 400)
+  assert.equal(missing.payload.error.code, 'PATH_UNSAFE')
+  assert.ok(missing.payload.error.message.includes('不存在'), missing.payload.error.message)
+
+  const relative = await call('/open', { headers: ORIGIN, body: { path: 'relative/dir' } })
+  assert.equal(relative.status, 400)
+  assert.equal(relative.payload.error.code, 'PATH_UNSAFE')
+  assert.ok(relative.payload.error.message.includes('相对'), relative.payload.error.message)
+
+  const empty = await call('/open', { headers: ORIGIN, body: {} })
+  assert.equal(empty.status, 400)
+  assert.equal(empty.payload.error.code, 'PATH_UNSAFE')
+  assert.ok(empty.payload.error.message.includes('为空'), empty.payload.error.message)
+
+  assert.equal(opened.length, 0, '被拒的请求不能触发打开动作')
 })
 
 test('路由 /open：打开失败返回 503，且照样受 loopback / 同源硬化保护', async () => {

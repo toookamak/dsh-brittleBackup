@@ -24,6 +24,18 @@ const SECRET_WORDS = new Set([
  */
 const NAME_LIKE_SUFFIX_RE = /(env|name|ref|id|path|url|file|header|prefix|scheme|type|mode|length|count|expires|at|set|s)$/i
 
+/** 公钥限定词：`publicKey` / `sshPublicKey` 可以公开，不算密钥。 */
+const PUBLIC_WORDS = new Set(['public', 'pub'])
+
+/**
+ * 公钥例外**只认 `publicKey` / `pubKey` 这一种形态**。
+ *
+ * 不能写成"名字里出现 public 就放行"：`publicApiKey` 这种命名会因此漏掉，
+ * 而它存的完全可能是一把真密钥。宁可把公钥也脱敏掉（用户自己再补一次），
+ * 也不能因为一个词就放过整类字段。
+ */
+const isPublicKeyName = (parts) => parts.length === 2 && PUBLIC_WORDS.has(parts[0]) && parts[1] === 'key'
+
 /** camelCase / snake_case / kebab-case 都要能切词。 */
 function keyTokens(key) {
   return key
@@ -40,6 +52,11 @@ function keyTokens(key) {
  * 用**切词后按词判定**而不是子串匹配：`apiKey` / `refreshToken` / `clientSecret` 命中，
  * 而 `maxTokens`（数字上限，复数词）、`tokens`、`requiredCredentials` 不命中 ——
  * 早期版本用子串匹配，把 `maxTokens: 256000` 当成密钥剥掉了（真 bug，已修）。
+ *
+ * 末位词是 `key` 也算密钥：`secretKey` / `signingKey` / `encryptionKey` /
+ * `AWS_SECRET_ACCESS_KEY` / `appKey` 这类**没有 `sk-` 前缀也没有长 hex 形状**的明文密钥，
+ * 防线 ③ 兜不住，只能靠防线 ② 拦住。名字指针（`keyId` / `keyName` / `apiKeyEnv`）
+ * 与公钥（`publicKey`）由上面的例外规则放行。
  */
 export function isSecretKey(key) {
   if (typeof key !== 'string' || key === '') return false
@@ -48,6 +65,7 @@ export function isSecretKey(key) {
   if (parts.length === 0) return false
   if (SECRET_WORDS.has(parts.join(''))) return true
   if (SECRET_WORDS.has(parts[parts.length - 1])) return true
+  if (parts[parts.length - 1] === 'key') return !isPublicKeyName(parts)
   for (let index = 0; index < parts.length - 1; index += 1) {
     if (parts[index] === 'api' && parts[index + 1] === 'key') return true
   }

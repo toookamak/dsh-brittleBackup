@@ -22,12 +22,14 @@ import {
   SKILLS_DIRNAME,
   assertWithin,
   checkArtifactPath,
+  checkNameSegment,
   extractedRoot,
   isArtifactArchiveName,
   timestamp,
 } from './paths.js'
-import { copyTree, ensureDir, listNames, pathExists, readJsonFile, readTextFile, removeTree, writeJsonAtomic, writeTextAtomic } from './nodefs.js'
+import { copyTree, ensureDir, listNames, pathExists, readBytes, readJsonFile, readTextFile, removeTree, writeJsonAtomic, writeTextAtomic } from './nodefs.js'
 import { extractZip } from './zip.js'
+import { scanTextForSecrets } from './redact.js'
 
 /** 宽松防爆上限（FORMAT.md §7）——本地模式没有远端限额，只防异常产物撑爆磁盘。 */
 export const LIMITS = Object.freeze({
@@ -170,6 +172,13 @@ export function validateArtifact(input) {
       errors.push('skills 清单里有一个条目缺少 name')
       continue
     }
+    // name 会被 restore/apply.js 拿去 join(skillsRoot, name) 再 removeTree，
+    // 所以必须先当成"单段名"校验：只查 path 是挡不住 `{name:'..', path:'skills/x'}` 的。
+    const nameChecked = checkNameSegment(skill.name)
+    if (!nameChecked.ok) {
+      errors.push(`skill 名称不安全（${JSON.stringify(skill.name)}）：${nameChecked.reason}`)
+      continue
+    }
     if (seenSkillNames.has(skill.name)) {
       errors.push(`skills 名称重复：${skill.name}`)
       continue
@@ -235,6 +244,24 @@ export function validateArtifact(input) {
   return { ok: errors.length === 0, errors, warnings, value }
 }
 
+/**
+ * 逐文件密钥扫描（防线③，SECURITY.md §2.3）。
+ *
+ * 用 latin1 解码：字节一一对应，既不会因为非法 UTF-8 抛错，也不会把二进制
+ * 悄悄换成 U+FFFD 让密钥特征消失 —— 对二进制资产来说这才是安全的一侧。
+ * @returns 命中列表（空数组 = 干净）
+ */
+async function scanFileForSecrets(absolutePath) {
+  let bytes
+  try {
+    bytes = await readBytes(absolutePath)
+  } catch {
+    // 读不出来就当不通过：宁可漏一个文件，也不能把没看过的文件放进产物。
+    return [{ pattern: 'unreadable' }]
+  }
+  return scanTextForSecrets(bytes.toString('latin1'))
+}
+
 /** 落盘：目录 + backup.json + 兜底文档 + （勾选时）skills\。 */
 export async function writeArtifact({
   targetRoot,
@@ -244,6 +271,8 @@ export async function writeArtifact({
   skillSources = [],
   date = new Date(),
 }) {
+  /** 因扫描到疑似密钥而被拒绝写入产物的文件（不静默：报告与任务警告都会点名）。 */
+  const withheld = []
   const name = uniqueArtifactDirName(targetRoot, date).candidates
   let dir = null
   for (const candidate of name) {
@@ -268,13 +297,25 @@ export async function writeArtifact({
     const names = artifact.items.skills.map(skill => skill.name)
     for (const source of skillSources) {
       if (!names.includes(source.name)) continue
-      const result = await copyTree(source.dir, join(dir, SKILLS_DIRNAME, source.name), { maxFileBytes: LIMITS.skillFileBytes })
+      const result = await copyTree(source.dir, join(dir, SKILLS_DIRNAME, source.name), {
+        maxFileBytes: LIMITS.skillFileBytes,
+        // 防线③对 skills 文件的唯一防线（SECURITY.md §2.3）：复制前逐文件扫描。
+        // 命中就**不写这个文件**并如实报告 —— 宁可少备一个文件，
+        // 也不能让"产物里绝不会出现密钥"这句承诺在勾了 skills 文件时失效。
+        shouldCopy: async (rel, absolutePath) => {
+          const hits = await scanFileForSecrets(absolutePath)
+          if (hits.length === 0) return true
+          withheld.push({ skill: source.name, rel, patterns: hits.map(hit => hit.pattern) })
+          return false
+        },
+      })
       copyReport.copied += result.copied
       for (const item of result.skipped) copyReport.skipped.push({ skill: source.name, ...item })
     }
     if (copyReport.copied > 0) written.push(`${SKILLS_DIRNAME}\\`)
   }
 
+  copyReport.withheld = withheld
   return { dir, written, skillCopy: copyReport }
 }
 

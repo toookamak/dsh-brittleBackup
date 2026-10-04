@@ -115,9 +115,14 @@ export async function countFiles(root) {
 
 /**
  * 逐字节复制目录树：保留子目录、空目录与二进制内容；符号链接跳过并记入 skipped。
+ *
+ * @param shouldCopy 可选的异步闸门 `(rel, absolutePath, size) => boolean`。
+ *   返回 false 的文件**不复制**，并以 `{ rel, reason }` 记进 skipped。
+ *   导出侧用它做"逐文件密钥扫描"（SECURITY.md §2.3 防线③对 skills 文件的唯一防线）——
+ *   必须在**复制前**判定，所以闸门跑在 `cp` 之前。
  * @returns {Promise<{copied:number, skipped:Array<{rel:string,reason:string}>}>}
  */
-export async function copyTree(source, destination, { maxFileBytes = Number.POSITIVE_INFINITY } = {}) {
+export async function copyTree(source, destination, { maxFileBytes = Number.POSITIVE_INFINITY, shouldCopy = null } = {}) {
   const skipped = []
   let copied = 0
   await ensureDir(destination)
@@ -141,6 +146,10 @@ export async function copyTree(source, destination, { maxFileBytes = Number.POSI
       continue
     }
     const from = join(source, ...entry.rel.split('/'))
+    if (typeof shouldCopy === 'function' && (await shouldCopy(entry.rel, from, entry.size)) !== true) {
+      skipped.push({ rel: entry.rel, reason: '扫描判定不可导出' })
+      continue
+    }
     await ensureDir(dirname(target))
     await cp(from, target)
     copied += 1

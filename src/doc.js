@@ -3,6 +3,9 @@
  *
  * 铁律：**自包含、可单独分享** —— 零密钥、零主机名 / 账号名、零配置原文、零本机路径。
  * 只给"照着重配"需要的名字、命令与可粘贴的配置片段。
+ *
+ * spec / 安装命令里的本机绝对路径一律替换成占位符（`safeSpec`），包名保留 ——
+ * 路径是主机信息，命令里的包名是用户重装时唯一要用的东西，两者不能一起掩掉。
  */
 import { ARTIFACT_VERSION } from './paths.js'
 import { stripRedacted } from './redact.js'
@@ -82,6 +85,34 @@ function table(headers, rows) {
 
 const escapeCell = (value) => String(value ?? '').replace(/\|/g, '\\|').replace(/\n/g, ' ')
 
+/** 本机绝对路径在可分享文档里一律换成这个占位符（与 query.js 的文案一致，但各模块各自实现，不互相导入）。 */
+export const PATH_PLACEHOLDER = '[本机路径已隐藏]'
+
+/**
+ * 识别"本机绝对路径"的四个形态（顺序即优先级）：
+ *   1. `file:` URL：`file:C:\…` / `file:///Users/…` / `file://server/share/…`（整段吃掉）；
+ *   2. UNC：`\\server\share\…`；
+ *   3. Windows 盘符：`C:\…` / `C:/…`；
+ *   4. POSIX 家目录与常见系统目录：`/Users/…`、`/home/…`、`/tmp/…` 等。
+ *
+ * **不许误伤**：插件名、`@scope/pkg`、版本号、`dsh plugin add <pkg>@<ver>` 必须原样保留
+ * —— 用户要靠包名手工重装，掩掉就等于这份文档没用了。
+ * 所以每个分支前面都加了边界断言：`https://…` 里的 `s:/` 不是盘符，
+ * `example.com/home/x` 也不是本机家目录；带 scheme 的 `link:C:\…` / `link:/home/…` 仍要掩掉。
+ */
+const LOCAL_PATH = /file:\/{0,3}[^\s"'`|]*|(?<!\\)\\\\[^\s"'`|]+|(?<![A-Za-z0-9+.-])[A-Za-z]:[\\/][^\s"'`|]*|(?<![A-Za-z0-9])\/(?:Users|home|root|var|tmp|mnt|opt|private)\/[^\s"'`|]*/g
+
+/**
+ * 把 spec / 安装命令等"照着重装"要用的文本里的本机绝对路径换成占位符。
+ *
+ * 只处理路径，不碰包名：U20（可分享产物）与"零主机信息"要求产物不带本机路径，
+ * 但重装必须还能照着敲，所以掩掉的只是路径那一段。
+ */
+export function safeSpec(value) {
+  if (typeof value !== 'string') return value
+  return value.replace(LOCAL_PATH, PATH_PLACEHOLDER)
+}
+
 /**
  * @param input.items 采集结果
  * @param input.entries 结构化条目（模型条目的 id/name 要用来渲染可粘贴片段）
@@ -136,22 +167,22 @@ export function renderFallbackDoc({ items, options, producer, credentialStatus =
     lines.push(table(
       ['插件名', '版本', '用途', '安装命令'],
       plugins.map(item => [
-        escapeCell(item.name),
-        escapeCell(item.resolvedVersion ?? '未知'),
-        escapeCell(item.description ?? ''),
-        `\`${escapeCell(item.installCommand ?? `dsh plugin add ${item.spec}`)}\``,
+        escapeCell(safeSpec(item.name)),
+        escapeCell(safeSpec(item.resolvedVersion ?? '未知')),
+        escapeCell(safeSpec(item.description ?? '')),
+        `\`${escapeCell(safeSpec(item.installCommand ?? `dsh plugin add ${safeSpec(item.spec)}`))}\``,
       ]),
     ))
     const unportable = plugins.filter(item => item.unportable === true)
     if (unportable.length > 0) {
       lines.push('')
       lines.push('> ⚠️ 本地路径依赖（跨机器不可用，需要你自己准备同样的目录）：')
-      for (const item of unportable) lines.push(`> - \`${item.name}\` → \`${item.spec}\``)
+      for (const item of unportable) lines.push(`> - \`${safeSpec(item.name)}\` → \`${safeSpec(item.spec)}\``)
     }
     const disabled = plugins.filter(item => item.enabled === false)
     if (disabled.length > 0) {
       lines.push('')
-      lines.push(`> 注意：备份时这些插件处于**被禁用**状态：${disabled.map(item => `\`${item.name}\``).join('、')}`)
+      lines.push(`> 注意：备份时这些插件处于**被禁用**状态：${disabled.map(item => `\`${safeSpec(item.name)}\``).join('、')}`)
     }
   }
   lines.push('')
@@ -244,8 +275,8 @@ export function renderFallbackDoc({ items, options, producer, credentialStatus =
     lines.push(table(
       ['名称', '描述', '本备份是否含文件'],
       skills.map(skill => [
-        escapeCell(skill.name),
-        escapeCell(skill.description ?? ''),
+        escapeCell(safeSpec(skill.name)),
+        escapeCell(safeSpec(skill.description ?? '')),
         skill.included === true ? '是' : '否（仅清单）',
       ]),
     ))

@@ -171,10 +171,14 @@ export async function collectAll({ ctx, env = process.env, options, logger } = {
     skillSource,
     bundlesOrder: pluginCollection.bundlesOrder,
     services: {
-      configEditor: configuration.ok,
+      // 这里只回答"**宿主有没有**这个服务"，即**可用性**，由宿主探测单独决定。
+      // 刻意不用 `configuration.ok` / `skillSource !== 'dir'`：那两个标志混进了"用户这次勾没勾"
+      // （不勾 profile 时根本不会去读配置），于是用户主动不勾就被说成"服务不可用"。
+      // 用户的选择由 warnings 里的"未勾选…"如实告知，不混进 degradation。
+      configEditor: serviceAvailable(ctx, 'configEditor', 'configuration'),
       settings: descriptors.ok,
       pluginManager: inventory.available,
-      skills: skillSource !== 'dir',
+      skills: serviceAvailable(ctx, 'skills', 'list'),
     },
   }
 
@@ -190,13 +194,20 @@ function safeHostname() {
   }
 }
 
-/** 给报告用：哪些服务在降级（UI 必须明示）。 */
+/**
+ * 给报告用：哪些**能力**在降级（UI 必须明示）。
+ *
+ * 只依据 `meta.services` 里的**服务可用性**产出 —— 那几个标志现在只由宿主探测决定。
+ * 用户这次没勾选某项是**选择**而不是能力缺失，所以绝不能出现在这里：
+ * 它由 collectAll 的 warnings（"未勾选 profile 配置：…"）如实告知。
+ */
 export function degradationNotes(meta) {
+  const services = meta?.services ?? {}
   const notes = []
-  if (!meta.services.configEditor) notes.push('当前 DSH 版本不支持配置的自动还原（configEditor 不可用）')
-  if (!meta.services.settings) notes.push('密钥路径图不可用，脱敏退化为字段名启发式')
-  if (!meta.services.pluginManager) notes.push('插件管理不可用，插件只能照文档手工安装')
-  if (!meta.services.skills) notes.push('skills 服务不可用，元数据来自目录扫描')
+  if (!services.configEditor) notes.push('当前 DSH 版本不支持配置的自动还原（configEditor 不可用）。这次只处理插件、模型和 skills；配置请打开兜底文档.md 手工重配。')
+  if (!services.settings) notes.push('密钥路径图不可用，脱敏退化为字段名启发式。导出后用②里的查询自己核对。')
+  if (!services.pluginManager) notes.push('插件管理不可用，插件不能自动安装。打开这份产物里的兜底文档.md，按里面的安装命令做。')
+  if (!services.skills) notes.push('skills 服务不可用，元数据来自目录扫描。名单可能不全，导出前请自己核对 skills 目录。')
   return notes
 }
 

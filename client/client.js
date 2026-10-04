@@ -5,7 +5,7 @@
  * factory 里通过宿主提供的 `require()` 取外部模块（这里只取 `react`），
  * 最后把 `{ name, inject, apply }` 交回去 —— 形状与参考实现（dsh-market）一致。
  *
- * 与宿主通信只走 `/brittle-backup/*` 这九个路由（见 docs/PROJECT-PLAN.md §17.2），
+ * 与宿主通信只走 `/brittle-backup/*` 这八个路由（见 docs/PROJECT-PLAN.md §17.2），
  * 页面不直接碰文件系统。
  *
  * 2026-10-02 体验优化（与宿主半一一对应）：
@@ -54,14 +54,21 @@ window.__ModuleLoader__.load({
     function describeError(error) {
       if (!error) return '未知错误'
       var text = String(error.message || error)
-      if (error.code === 'PICKER_NOT_ALLOWED') return text + '（请先用"选择目录"或"登记路径"）'
-      if (error.code === 'CHECKS_BLOCKED') return text + '（有拦截级检查项，先把它们处理掉）'
-      if (error.code === 'BUSY') return '已有任务在进行中，请等它结束或取消'
-      if (error.code === 'OPEN_UNSUPPORTED') return '当前系统不支持从设置页打开目录，请手动打开：' + text
-      if (error.code === 'OPEN_FAILED') return '打开目录失败：' + text
-      if (error.code === 'PATH_UNSAFE') return text + '（要打开/登记的都必须是存在的绝对目录）'
-      if (error.code === 'ARCHIVE_INVALID' || error.code === 'ARCHIVE_CRC' || error.code === 'ARCHIVE_UNSAFE_PATH') {
-        return '压缩包读不了：' + text + '（可以改用未压缩的产物目录）'
+      var code = error.code
+      if (code === 'NOT_LOOPBACK' || code === 'FORWARDED_HEADER' || code === 'BAD_ORIGIN' || code === 'BAD_HOST' || code === 'HTTP_403') {
+        return '这次请求被本机安全检查拦住了。请改用 http://127.0.0.1 打开这个页面后再试，不要用局域网地址或域名。'
+      }
+      if (code === 'TARGET_REQUIRED') return '还没选落点，不能导出。请选一个你自己保管的目录，或填入绝对路径后点「确认这个目录」。'
+      if (code === 'PICKER_NOT_ALLOWED') return '这个目录还没被确认。先点「选择目录…」，或把绝对路径填进输入框后点「确认这个目录」，再重试。'
+      if (code === 'CHECKS_BLOCKED') return text + '。先看预览里标红的项；不能自动写的，打开这份产物里的兜底文档.md，按里面的安装命令和 yaml 片段做。'
+      if (code === 'BUSY') return '已有任务在进行中。等它结束，或点「取消当前任务」。'
+      if (code === 'OPEN_UNSUPPORTED') return '当前系统不能从设置页打开目录。请自己到文件管理器打开：' + text
+      if (code === 'OPEN_FAILED') return '打开目录失败。请自己到文件管理器打开：' + text
+      if (code === 'PATH_UNSAFE') return text + '。要打开或确认的必须是已经存在的绝对目录。'
+      if (code === 'ZIP_FAILED') return '打包失败，这次没有交付。临时目录还在，不是已交付的目录。可以取消「打包成 zip」后重试，或自己取走临时目录。'
+      if (code === 'SECRET_SCAN') return text + '。这次没有写出文件。去掉内联密钥后再导出。'
+      if (code === 'ARCHIVE_INVALID' || code === 'ARCHIVE_CRC' || code === 'ARCHIVE_UNSAFE_PATH') {
+        return '压缩包读不了：' + text + '。改用未压缩的产物目录再预览。'
       }
       return text
     }
@@ -159,6 +166,7 @@ window.__ModuleLoader__.load({
       var result = task.result
       if (!result || typeof result !== 'object') return []
       var lines = []
+      var succeeded = !!task.finishedAt && !task.error && !task.canceled
       if (result.direction === 'export') {
         if (task.finishedAt) lines.push('最终完成时间：' + task.finishedAt)
         lines.push('交付物：' + result.dir)
@@ -169,15 +177,29 @@ window.__ModuleLoader__.load({
         lines.push('本次含：' + OPTION_LABELS.filter(function (pair) {
           return result.options && result.options[pair[0]] === true
         }).map(function (pair) { return pair[1] }).join('、'))
-        if (result.redactionCount) lines.push('已剥离疑似密钥 ' + result.redactionCount + ' 处（不会写进产物，恢复后要自己补）')
+        var stripped = typeof result.redactionCount === 'number' ? result.redactionCount : 0
+        lines.push('已剥离疑似密钥 ' + stripped + ' 处（含 0）。密钥值不在任何产物里；主机名只在 backup.json，不在兜底文档。')
+        if (succeeded) {
+          lines.push('换机：把整个 zip 或整个目录给对方，不要只发其中一个文件。')
+          lines.push(result.options && result.options.doc === true
+            ? '只想让人照着重配：单独发兜底文档.md。'
+            : '这次没生成兜底文档，不能单独把一份 md 发给别人照着重配。')
+          lines.push('不要外传 backup.json：里面有主机名和本机模型结构，没有密钥值，但不是可分享件。')
+          if (!result.options || result.options.skillFiles !== true) lines.push('这次没勾 skills 文件：换过去只有名单，没有正文。')
+          lines.push('要自己核对，用②里的「查询这份备份」。')
+        }
       } else if (result.direction === 'import') {
         lines.push('成功 ' + (result.applied || []).length + ' 项、失败 ' + (result.failed || []).length +
           ' 项、需手工 ' + (result.manual || []).length + ' 项、已跳过 ' + (result.skipped || []).length + ' 项')
         if (result.snapshot) lines.push('回滚快照：' + result.snapshot)
-        if (result.missingCredentials && result.missingCredentials.length) lines.push('需要自己补的密钥：' + result.missingCredentials.join('、'))
+        if (result.missingCredentials && result.missingCredentials.length) {
+          lines.push('需要自己补的密钥：' + result.missingCredentials.join('、'))
+          lines.push('到设置里的模型/凭据，按这些名字自己填。本插件不读值。')
+        }
         if (result.redactedSkipped && result.redactedSkipped.length) lines.push('跳过 ' + result.redactedSkipped.length + ' 处已剥离的密钥（不会用占位符覆盖目标机）')
+        if (result.manual && result.manual.length) lines.push('只能手工的项：打开这份产物里的兜底文档.md，按里面的安装命令和 yaml 片段做。')
         if (result.residual && result.residual.length) lines.push('回滚残留 ' + result.residual.length + ' 处（展开下方「完整结果」看细节）')
-        lines.push(result.restartRequired ? '需要重启 DSH 才完全生效' : '无需重启')
+        lines.push(result.restartRequired ? '需要重启 DSH 才完全生效。请你自己重启，本页不会替你重启。' : '无需重启')
       }
       return lines
     }
@@ -204,7 +226,7 @@ window.__ModuleLoader__.load({
       function warned(key) { return byKey[key] && byKey[key].verdict === 'warning' }
 
       if (blocked('peer-dependencies')) add('block', '有插件声明的依赖和这台机器的 DSH 版本不兼容，装上去可能起不来，已拦住自动安装。')
-      if (blocked('local-path-dependency')) add('block', '备份里有指向本机绝对路径的插件，换机器一定装不上，只能照兜底文档手工处理。')
+      if (blocked('local-path-dependency')) add('block', '备份里有指向本机绝对路径的插件，换机器一定装不上。打开这份产物里的兜底文档.md，按里面的安装命令和 yaml 片段做。')
       if (blocked('entry-id-conflict')) add('block', '有插件的 loader id 和这台机器上已有的插件撞了，直接装可能让 DSH 起不来。')
       if (blocked('path-safety')) add('block', '产物里有不安全（含 .. 或绝对路径）的文件路径，拒绝写入。')
       if (blocked('agents-running')) add('block', '现在有 agent 正在运行，导入被挡住了：等它跑完再回来。')
@@ -213,14 +235,27 @@ window.__ModuleLoader__.load({
       if (warned('config-entry-conflict')) add('warn', '有配置条目和这台机器上的现有配置不一样：默认保留现有的，勾选才会覆盖。')
       if (warned('skills-same-name')) add('warn', '有同名 skill：默认跳过不写，想覆盖要自己勾选。')
       if (warned('model-structure')) add('warn', '模型配置有几处形状可疑，插件不会盲写，报告里会给可以自己粘贴的片段。')
-      if (warned('plugin-manager')) add('warn', '这台机器的插件管理不可用：插件只能照兜底文档手工装。')
+      if (warned('plugin-manager')) add('warn', '这台机器的插件管理不可用：打开这份产物里的兜底文档.md，按里面的安装命令和 yaml 片段做。')
       var manual = (inspection.plan || []).filter(function (entry) { return entry.action === 'manual' })
-      if (manual.length) add('warn', '有 ' + manual.length + ' 项（' + manual.slice(0, 3).map(function (entry) { return entry.ref }).join('、') + (manual.length > 3 ? ' 等' : '') + '）只能照兜底文档手工处理。')
+      if (manual.length) add('warn', '有 ' + manual.length + ' 项（' + manual.slice(0, 3).map(function (entry) { return entry.ref }).join('、') + (manual.length > 3 ? ' 等' : '') + '）只能手工。打开这份产物里的兜底文档.md，按里面的安装命令和 yaml 片段做。')
       var credential = byKey['missing-credentials']
-      if (credential && /补 \d+ 项/.test(credential.detail || '')) add('info', credential.detail + '：导入后要你自己填，插件永远不读 key 的值。')
+      if (credential && /补 \d+ 项/.test(credential.detail || '')) add('info', credential.detail + '：到设置里的模型/凭据，按这些名字自己填。本插件不读值。')
       var workspace = (inspection.plan || []).filter(function (entry) { return entry.requiresConfirm })
       if (workspace.length) add('info', '有 ' + workspace.length + ' 项属于"代码执行许可"（allowBuilds），必须你显式打勾才会写。')
       return notes
+    }
+
+    /**
+     * 计划的默认勾选 + 用户显式改动的合成结果。
+     *
+     * 三态：`overrides[id]` 缺省时**听计划自己的 `selected`**。
+     * 这样"值不同 → 默认不写、勾选才覆盖"这类默认关闭的项，界面复选框会如实显示未勾选，
+     * 用户也能随时把它勾上（单靠一个 `off` 通道做不到这件事）。
+     */
+    function effectiveSelected(entry, selection) {
+      var overrides = (selection && selection.overrides) || {}
+      if (typeof overrides[entry.id] === 'boolean') return overrides[entry.id]
+      return entry.selected === true
     }
 
     /**
@@ -229,7 +264,6 @@ window.__ModuleLoader__.load({
      */
     function summarizeInspection(inspection, selection) {
       if (!inspection) return null
-      var off = (selection && selection.off) || {}
       var auto = 0
       var attention = 0
       var manual = 0
@@ -238,14 +272,14 @@ window.__ModuleLoader__.load({
         if (entry.action === 'manual') { manual += 1; return }
         if (CONFIRM_ACTIONS.indexOf(entry.action) >= 0) { attention += 1; return }
         if (AUTO_ACTIONS.indexOf(entry.action) < 0) return
-        var selected = off[entry.id] !== true
+        var selected = effectiveSelected(entry, selection)
         if (selected && entry.level === 'info' && entry.requiresConfirm !== true) auto += 1
         else attention += 1
       })
       var blockedGlobal = inspection.blockedGlobal || []
       var tone = inspection.blocked ? 'block' : (attention > 0 ? 'warn' : 'ok')
       var headline
-      if (tone === 'block') headline = '不能自动还原：有 ' + blockedGlobal.length + ' 项拦截级问题，只能照兜底文档手工处理'
+      if (tone === 'block') headline = '不能自动还原：有 ' + blockedGlobal.length + ' 项拦截级问题。打开这份产物里的兜底文档.md，按里面的安装命令和 yaml 片段做'
       else if (tone === 'ok') headline = '可以放心还原：' + auto + ' 项都可以自动恢复'
       else headline = '可以还原，但有 ' + attention + ' 项需要你确认'
       return {
@@ -299,9 +333,14 @@ window.__ModuleLoader__.load({
      */
     function dirPicker(label, value, onChange, onPick, onRegister, disabled, extraButtons) {
       var buttons = [
-        h('button', { key: 'pick', style: styles.button, onClick: onPick, disabled: disabled || !host.hasPicker },
-          host.hasPicker ? '选择目录…' : '选择目录（宿主不支持）'),
-        h('button', { key: 'register', style: styles.button, onClick: onRegister, disabled: disabled || !value }, '登记路径'),
+        h('button', {
+          key: 'pick',
+          style: styles.button,
+          onClick: onPick,
+          disabled: disabled || !host.hasPicker,
+          title: host.hasPicker ? '' : '没有目录选择器。把绝对路径填进输入框，再点「确认这个目录」。',
+        }, host.hasPicker ? '选择目录…' : '选择目录不可用'),
+        h('button', { key: 'register', style: styles.button, onClick: onRegister, disabled: disabled || !value, title: '确认这个绝对路径，导出或导入才会接受它' }, '确认这个目录'),
       ]
       for (const extra of extraButtons || []) {
         buttons.push(h('button', {
@@ -314,7 +353,7 @@ window.__ModuleLoader__.load({
       }
       return h('div', { style: styles.row },
         h('span', { style: { minWidth: 64 } }, label),
-        h('input', { style: styles.input, value: value || '', placeholder: '选择一个目录，或把绝对路径登记进来', onChange: function (event) { onChange(event.target.value) }, disabled: disabled }),
+        h('input', { style: styles.input, value: value || '', placeholder: '选择一个目录，或填入绝对路径后点确认', onChange: function (event) { onChange(event.target.value) }, disabled: disabled }),
         buttons)
     }
 
@@ -421,7 +460,7 @@ window.__ModuleLoader__.load({
               h('td', { style: styles.td }, auto
                 ? h('input', {
                   type: 'checkbox',
-                  checked: !selection.off[entry.id],
+                  checked: effectiveSelected(entry, selection),
                   disabled: disabled,
                   onChange: function (event) { handlers.toggle(entry.id, event.target.checked) },
                 })
@@ -430,6 +469,9 @@ window.__ModuleLoader__.load({
               h('td', { style: styles.td }, entry.ref),
               h('td', { style: Object.assign({}, styles.td, { color: LEVEL_COLOR[entry.level] || 'inherit' }) }, ACTION_LABEL[entry.action] || entry.action),
               h('td', { style: styles.td }, entry.reason,
+                entry.action === 'manual'
+                  ? h('div', { style: styles.hint }, '打开这份产物里的兜底文档.md，按里面的安装命令和 yaml 片段做。')
+                  : null,
                 entry.diff && entry.diff.length
                   ? h('details', null, h('summary', { style: styles.hint }, 'diff ' + entry.diff.length + ' 处'),
                     h('pre', { style: styles.pre }, entry.diff.map(function (change) {
@@ -468,7 +510,7 @@ window.__ModuleLoader__.load({
       var inspection = inspectionState[0]
       var setInspection = inspectionState[1]
 
-      var selectionState = React.useState({ off: {}, overwriteSkills: [], overwritePlugins: [], ackBuildScripts: false })
+      var selectionState = React.useState({ overrides: {}, off: {}, overwriteSkills: [], overwritePlugins: [], ackBuildScripts: false })
       var selection = selectionState[0]
       var setSelection = selectionState[1]
 
@@ -615,10 +657,9 @@ window.__ModuleLoader__.load({
 
       function togglePlan(id, checked) {
         setSelection(function (previous) {
-          var off = Object.assign({}, previous.off)
-          if (checked) delete off[id]
-          else off[id] = true
-          return Object.assign({}, previous, { off: off })
+          var overrides = Object.assign({}, previous.overrides)
+          overrides[id] = checked === true
+          return Object.assign({}, previous, { overrides: overrides })
         })
       }
 
@@ -672,8 +713,8 @@ window.__ModuleLoader__.load({
 
       function queryPanel() {
         return h('div', { style: styles.card },
-          h('div', { style: styles.title }, '③ 备份配置查询 / 复制'),
-          h('div', { style: styles.hint }, '从②导入还原中当前填写的备份目录或 zip 读取查询内容；插件失效时可复制插件名、版本、配置条目和必要环境变量。密钥值、主机名和本机绝对路径不会显示。'),
+          h('div', { style: styles.title }, '查询这份备份（可复制）'),
+          h('div', { style: styles.hint }, '这是②里的核对动作，不是第三份备份。读取上面填写的备份目录或 zip；插件失效时可复制插件名、版本、配置条目和必要环境变量。密钥值、主机名和本机绝对路径不会显示。'),
           h('label', { style: Object.assign({}, styles.row, { marginTop: 8 }) },
             h('input', { type: 'checkbox', checked: query.detail === true, onChange: function (event) { setQuery(function (previous) { return Object.assign({}, previous, { detail: event.target.checked }) }) } }),
             '显示详细配置结构（仍然隐藏密钥值）'),
@@ -707,7 +748,7 @@ window.__ModuleLoader__.load({
         h('div', { style: styles.card },
           h('div', { style: styles.title }, 'dsh-BrittleBackup'),
           h('div', { style: styles.hint },
-            '把配置、插件清单、模型配置与 skills 导出成一份备份（默认打成 zip），再从这里导入还原；导入前做 14 项兼容性验证，写入前自动快照。'),
+            '这不是全量备份，也不替代已有的备份插件。它补的是 skills、模型配置去 key，以及一份可单独转发的兜底文档。第一次请先导出。'),
           status
             ? h('div', { style: Object.assign({}, styles.row, { marginTop: 8 }) },
               h('span', { style: styles.hint }, '插件版本 ' + status.plugin.version),
@@ -729,18 +770,21 @@ window.__ModuleLoader__.load({
             optionRow('doc', '兜底文档', currentOptions.doc, taskRunning, toggleOption),
             optionRow('compress', '打包成 zip（推荐）', currentOptions.compress, taskRunning, toggleOption)),
           dirPicker('落点', dirs.export, function (value) { setDir('export', value) }, function () { pick('export') }, function () { register('export') }, taskRunning, [
-            { key: 'last', label: '使用上次路径', onClick: useLastExportDir, disabled: lastDir === '', title: lastDir === '' ? '还没有成功导出过' : '上次成功导出到：' + lastDir },
-            { key: 'open', label: '打开备份路径', onClick: function () { openPath('export') }, disabled: !dirs.export && lastDir === '', title: '在系统文件管理器里打开（输入框里的路径优先）' },
+            { key: 'last', label: '填入上次目录', onClick: useLastExportDir, disabled: lastDir === '', title: lastDir === '' ? '还没有成功导出过' : '上次成功导出的目录（不是历史列表）：' + lastDir },
+            { key: 'open', label: '打开所填目录', onClick: function () { openPath('export') }, disabled: !dirs.export && lastDir === '', title: '在系统文件管理器里打开输入框里的目录；还没填时打开上次成功导出的目录' },
           ]),
           h('div', { style: styles.row },
-            h('button', { style: styles.buttonPrimary, disabled: busy || taskRunning, onClick: runExport }, '开始导出'),
-            h('span', { style: styles.hint }, '不填落点就写到插件工作目录；勾了"打包成 zip"就只留一个 .zip，打包失败会自动退回未压缩目录。产物里绝不会出现密钥。'))),
+            h('button', { style: styles.buttonPrimary, disabled: busy || taskRunning || !dirs.export, onClick: runExport }, '开始导出'),
+            h('span', { style: Object.assign({}, styles.hint, !dirs.export ? { color: '#d48806' } : null) },
+              !dirs.export
+                ? '还没选落点，不能导出。请选一个你自己保管的目录。插件工作目录不是备份库，重装或清理可能丢掉。'
+                : '勾了“打包成 zip”就只交付一个 .zip；打包失败就是失败，临时目录还在，不是已交付的目录。密钥值不会写入产物；主机名只在 backup.json，不在兜底文档。'))),
 
         h('div', { style: styles.card },
           h('div', { style: styles.title }, '② 导入还原'),
           dirPicker('来源', dirs.import, function (value) { setDir('import', value) }, function () { pick('import') }, function () { register('import') }, taskRunning, [
             { key: 'zip', label: '选择 ZIP…', onClick: pickZip, disabled: !host.hasFilePicker, title: host.hasFilePicker ? '直接选择一个 .zip 备份文件' : '宿主未提供文件选择器，也可手动填写 zip 绝对路径后登记' },
-            { key: 'open', label: '打开备份路径', onClick: function () { openPath('import') }, disabled: !dirs.import, title: '在系统文件管理器里打开来源目录或 zip 所在位置' },
+            { key: 'open', label: '打开所填目录', onClick: function () { openPath('import') }, disabled: !dirs.import, title: '在系统文件管理器里打开来源目录或 zip 所在位置' },
           ]),
           h('div', { style: styles.row },
             h('button', { style: styles.button, disabled: busy || taskRunning || !dirs.import, onClick: runInspect }, '预览（只读）'),
@@ -800,6 +844,7 @@ window.__ModuleLoader__.load({
     // 宿主侧仿真测试直接断言这些纯函数（渲染结果之外的第二层保障）。
     exports.summarizeInspection = summarizeInspection
     exports.plainNotes = plainNotes
+    exports.describeError = describeError
     exports.resultLines = resultLines
     exports.taskStatus = taskStatus
     exports.progressBar = progressBar

@@ -2,6 +2,7 @@ import test from 'node:test'
 import assert from 'node:assert/strict'
 import { collectAll } from '../src/collect/index.js'
 import { DEFAULT_OPTIONS } from '../src/settings.js'
+import { REDACTED } from '../src/redact.js'
 import { makeFakeHost } from './helpers/fake-host.js'
 
 function options(patch = {}) {
@@ -34,6 +35,32 @@ test('采集：只收录有 override 的 patch 目标条目，id 用 patchId', a
   const ids = collected.items.config.entries.map(entry => entry.id)
   assert.deepEqual(ids.sort(), ['agent-default-model', 'llm-pi-ai'])
   assert.equal(ids.includes('ui-chat'), false, '空 override 的条目不能进产物')
+})
+
+test('采集：inherited 里的内联明文密钥同样被剥离，并记进 redactions', async () => {
+  const INHERITED_PLAIN = 'inherited-plain-value-7b21'
+  const fake = await host({
+    records: [
+      {
+        id: 'llm-pi-ai',
+        name: '@deepseek-ai/dsh-llm-pi-ai',
+        override: { providers: { xiuxian: { apiKeyEnv: 'XIUXIAN_API_KEY', models: [{ id: 'gpt-6-luna' }] } } },
+        inherited: { providers: { xiuxian: { secretKey: INHERITED_PLAIN, apiKeyEnv: 'XIUXIAN_API_KEY' } } },
+      },
+      { id: 'agent-default-model', name: '@deepseek-ai/dsh-agent-default-model', override: { provider: 'deepseek-account', model: 'deepseek-flash' } },
+      { id: 'ui-chat', name: '@deepseek-ai/dsh-client-ui-chat', override: {} },
+    ],
+  })
+  const collected = await collectAll({ ctx: fake.ctx, env: fake.env, options: options() })
+  const entry = collected.items.config.entries.find(item => item.id === 'llm-pi-ai')
+  assert.equal(entry.inherited.providers.xiuxian.secretKey, REDACTED, '宿主默认值里的明文密钥不能进产物')
+  assert.equal(entry.inherited.providers.xiuxian.apiKeyEnv, 'XIUXIAN_API_KEY', '名字指针保留')
+  assert.equal(JSON.stringify(collected).includes(INHERITED_PLAIN), false, '整个采集结果里都不许出现该明文')
+  assert.deepEqual(entry.redactions, [{ pointer: '/inherited/providers/xiuxian/secretKey', reason: 'inline-secret' }])
+  assert.ok(
+    collected.items.redactions.some(item => item.kind === 'entry' && item.ref === 'llm-pi-ai' && item.pointer === '/inherited/providers/xiuxian/secretKey'),
+    'items.redactions[] 必须汇总条目级剥离记录',
+  )
 })
 
 test('采集：插件清单带 enabled / source / 安装命令，git commit 来自 lockfile', async () => {

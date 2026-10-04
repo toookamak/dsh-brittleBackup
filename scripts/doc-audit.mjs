@@ -15,6 +15,7 @@
  */
 import { readFile } from 'node:fs/promises'
 import { isAbsolute, join, resolve } from 'node:path'
+import { safeSpec } from '../src/doc.js'
 
 const target = process.argv[2]
 if (typeof target !== 'string' || target.trim() === '') {
@@ -59,7 +60,10 @@ for (const plugin of plugins) {
   check(doc.includes(plugin.name), `插件名字缺失：${plugin.name}`)
   const command = typeof plugin.installCommand === 'string' ? plugin.installCommand : ''
   if (command !== '') {
-    check(doc.includes(command), `安装命令缺失：${command}`)
+    // 文档里渲染的是**掩掉本机路径之后**的命令（U20：可分享产物零本机路径），
+    // 所以这里要比对掩码后的形态，否则带本地路径的插件会让盲测误报。
+    const expected = safeSpec(command)
+    check(doc.includes(expected), `安装命令缺失：${expected}`)
   } else {
     notes.push(`插件 ${plugin.name} 没有安装命令，文档里只有名字`)
   }

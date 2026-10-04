@@ -23,6 +23,41 @@ test('isSecretKey：剥离值，但放过名字指针与"复数/计数"字段', 
   assert.equal(isSecretKey('requiredCredentials'), false)
 })
 
+test('isSecretKey：末位词是 key 的字段名判为密钥，但公钥与名字指针照样放过', () => {
+  // 这类明文密钥既没有 sk- 前缀也不是长 hex，防线 ③ 兜不住，只能靠防线 ②。
+  assert.equal(isSecretKey('secretKey'), true)
+  assert.equal(isSecretKey('signingKey'), true)
+  assert.equal(isSecretKey('encryptionKey'), true)
+  assert.equal(isSecretKey('appKey'), true)
+  assert.equal(isSecretKey('AWS_SECRET_ACCESS_KEY'), true)
+
+  // 名字 / 位置 / 计数，绝不能因为带了 key 字样就误伤（maxTokens 曾被误剥，真 bug）。
+  assert.equal(isSecretKey('maxTokens'), false)
+  assert.equal(isSecretKey('maxOutputTokens'), false)
+  assert.equal(isSecretKey('tokenPath'), false)
+  assert.equal(isSecretKey('apiKeyEnv'), false)
+  assert.equal(isSecretKey('keyId'), false)
+  assert.equal(isSecretKey('keyName'), false)
+  assert.equal(isSecretKey('keyPath'), false)
+  assert.equal(isSecretKey('publicKey'), false)
+  assert.equal(isSecretKey('pubKey'), false)
+  // 公钥例外只认 publicKey / pubKey 这一种形态：带 public 的别的组合照旧按密钥处理，
+  // 否则 publicApiKey 这种命名会成为漏网的真密钥。
+  assert.equal(isSecretKey('publicApiKey'), true)
+  assert.equal(isSecretKey('publicSigningKey'), true)
+})
+
+test('stripSecrets：*Key 明文被剥离，防线 ③ 对同一个值本来抓不到（协同而非重复）', () => {
+  const PLAIN = 'plain-signing-value-9f3a'
+  // 前置：这个明文值既没有 sk- 前缀也不是长 hex/base64，防线 ③ 确实拦不住。
+  assert.deepEqual(scanForSecrets({ secretKey: PLAIN }), [])
+
+  const { value, redactions } = stripSecrets({ secretKey: PLAIN }, {})
+  assert.equal(value.secretKey, REDACTED)
+  assert.deepEqual(redactions, [{ pointer: '/secretKey', reason: 'inline-secret' }])
+  assert.deepEqual(scanForSecrets(value), [], '剥离后产物里不能留下可被防线 ③ 命中的明文')
+})
+
 test('stripSecrets：嵌套内联密钥被剥离，apiKeyEnv 保留', () => {
   const input = {
     providers: {

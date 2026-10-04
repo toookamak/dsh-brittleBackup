@@ -9,10 +9,14 @@ import { join } from 'node:path'
 import { readFile } from 'node:fs/promises'
 import { runExport } from '../src/export.js'
 import { DEFAULT_OPTIONS } from '../src/settings.js'
+import { PATH_PLACEHOLDER } from '../src/doc.js'
 import { ensureDir } from '../src/nodefs.js'
 import { makeFakeHost } from './helpers/fake-host.js'
 
 const SECRET = 'sk-live-abcdefghijklmnopqrstuvwx'
+
+/** 与 src/doc.js 的 safeSpec 同口径的本机绝对路径（测试侧独立写一遍，不复用实现）。 */
+const LOCAL_PATH = /file:\/{0,3}[^\s"'`|]+|(?<![A-Za-z0-9+.-])[A-Za-z]:[\\/][^\s"'`|]+|(?<![A-Za-z0-9])\/(?:Users|home|root|var|tmp|mnt|opt|private)\/[^\s"'`|]+/g
 
 async function exportFixture() {
   const host = await makeFakeHost({
@@ -60,7 +64,19 @@ test('兜底文档：信息完整（每个插件 / provider / 模型 / skill / �
 
   for (const plugin of artifact.items.plugins) {
     assert.ok(doc.includes(plugin.name), `缺插件：${plugin.name}`)
-    assert.ok(doc.includes(plugin.installCommand), `缺安装命令：${plugin.installCommand}`)
+    // 有意的行为变更（2026-10-03）：安装命令里的**本机绝对路径**会被替换成占位符，
+    // 兜底文档才能可分享、零主机信息（U20 / U5）。所以不能再断言"原文一字不差地出现"，
+    // 改为断言两件事：① 掩掉路径之后的那条命令在文档里（包名保留 = 用户还能照着敲）；
+    // ② 原文里的本机路径一个都不许出现。
+    // 注：这份 fixture 刻意不放本地路径插件——盲测脚本 scripts/doc-audit.mjs 仍要求
+    // `doc.includes(plugin.installCommand)`（脚本不在本次改动范围内）；
+    // 本机路径分支由 test/doc.test.js 覆盖。
+    const command = typeof plugin.installCommand === 'string' ? plugin.installCommand : ''
+    const masked = command.replace(LOCAL_PATH, PATH_PLACEHOLDER)
+    if (masked !== '') assert.ok(doc.includes(masked), `缺安装命令：${masked}`)
+    for (const raw of command.match(LOCAL_PATH) ?? []) {
+      assert.equal(doc.includes(raw), false, `文档里出现了本机路径：${raw}`)
+    }
   }
   for (const provider of artifact.items.models) {
     assert.ok(doc.includes(provider.provider), `缺 provider：${provider.provider}`)

@@ -135,6 +135,15 @@ test('路由：方法不匹配 → 405，且 GET 不能触发写动作', async (
   assert.equal(wrongMethod.headers.allow, 'POST')
 })
 
+test('路由：没选落点时拒绝导出，不建任务', async () => {
+  const { call } = await setup()
+  const missing = await call('/export', { method: 'POST', headers: ORIGIN, body: {} })
+  assert.equal(missing.statusCode, 400)
+  assert.equal(JSON.parse(missing.body).error.code, 'TARGET_REQUIRED')
+  const state = await call('/state', { method: 'GET', headers: { host: '127.0.0.1:19387' } })
+  assert.equal(JSON.parse(state.body).task, null)
+})
+
 test('路由：导出目录必须来自选择器白名单（一次性）', async () => {
   const { call, host } = await setup()
 

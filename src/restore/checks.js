@@ -4,7 +4,7 @@
  * 判定级别：`block`（拦截）/ `warn`（警告）/ `info`（信息）。全局拦截会拒绝执行写入，
  * 但**不影响**其它项的结论与"照兜底文档怎么办"的指引。
  */
-import { checkArtifactPath } from '../paths.js'
+import { checkArtifactPath, checkNameSegment } from '../paths.js'
 import { deepEqual, diffObjects } from '../diff.js'
 import { satisfies } from '../semver.js'
 import { validateModelStructure } from '../collect/models.js'
@@ -32,11 +32,17 @@ export async function runChecks({ artifact, host, ctx = null }) {
   const pathProblems = []
   for (const file of items.files) {
     const checked = checkArtifactPath(file.path)
-    if (!checked.ok) pathProblems.push({ ref: file.path, reason: checked.reason })
+    if (!checked.ok) pathProblems.push({ ref: file.path, reason: checked.reason, target: { kind: 'file', ref: file.path } })
   }
   for (const skill of items.skills) {
+    // 名字才是会被拿去拼路径的东西（apply.js: join(skillsRoot, name)），所以按 name 定位。
+    const checkedName = checkNameSegment(skill.name)
+    if (!checkedName.ok) {
+      pathProblems.push({ ref: String(skill.name), reason: `skill 名称不安全：${checkedName.reason}`, target: { kind: 'skill', ref: String(skill.name) } })
+      continue
+    }
     const checked = checkArtifactPath(skill.path)
-    if (!checked.ok) pathProblems.push({ ref: skill.path, reason: checked.reason })
+    if (!checked.ok) pathProblems.push({ ref: skill.path, reason: checked.reason, target: { kind: 'skill', ref: skill.name } })
   }
   checks.push(result(2, 'path-safety', '路径安全', 'item', 'block', pathProblems.length === 0 ? 'ok' : 'blocked',
     pathProblems.length === 0 ? `${items.files.length} 个文件条目、${items.skills.length} 个 skill 路径都通过校验` : `${pathProblems.length} 个路径不安全`,
@@ -70,7 +76,7 @@ export async function runChecks({ artifact, host, ctx = null }) {
         peerUnknown.push({ ref: `${plugin.name} → ${peer}`, reason: verdict.reason ?? '无法判定' })
         continue
       }
-      if (!verdict.satisfied) peerProblems.push({ ref: `${plugin.name} → ${peer}`, reason: `声明 ${range}，当前 ${host.dshVersion}` })
+      if (!verdict.satisfied) peerProblems.push({ ref: `${plugin.name} → ${peer}`, reason: `声明 ${range}，当前 ${host.dshVersion}`, target: { kind: 'plugin', ref: plugin.name } })
     }
   }
   checks.push(result(4, 'peer-dependencies', '插件 peerDependencies', 'item', 'block', peerProblems.length === 0 ? 'ok' : 'blocked',
@@ -82,7 +88,7 @@ export async function runChecks({ artifact, host, ctx = null }) {
   const localDeps = items.plugins.filter(plugin => plugin.unportable || plugin.source === 'local-path')
   checks.push(result(5, 'local-path-dependency', '本地路径依赖', 'item', 'block', localDeps.length === 0 ? 'ok' : 'blocked',
     localDeps.length === 0 ? '没有 link:/file: 绝对路径依赖' : `${localDeps.length} 个插件是本地路径依赖，跨机器会失败`,
-    { items: localDeps.map(plugin => ({ ref: plugin.name, reason: plugin.spec, level: 'block' })), action: GUIDANCE }))
+    { items: localDeps.map(plugin => ({ ref: plugin.name, reason: plugin.spec, level: 'block', target: { kind: 'plugin', ref: plugin.name } })), action: GUIDANCE }))
 
   const conflicts = []
   const unknownIds = []
@@ -98,7 +104,7 @@ export async function runChecks({ artifact, host, ctx = null }) {
     }
     for (const id of info.patchIds) {
       const owner = knownIdOwner.get(id)
-      if (owner !== undefined && owner !== plugin.name) conflicts.push({ ref: `${plugin.name} → ${id}`, reason: `id 已被 ${owner} 占用` })
+      if (owner !== undefined && owner !== plugin.name) conflicts.push({ ref: `${plugin.name} → ${id}`, reason: `id 已被 ${owner} 占用`, target: { kind: 'plugin', ref: plugin.name } })
     }
   }
   checks.push(result(6, 'entry-id-conflict', 'loader entry id 冲突', 'item', 'block', conflicts.length === 0 ? 'ok' : 'blocked',

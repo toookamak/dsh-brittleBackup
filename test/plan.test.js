@@ -2,6 +2,7 @@ import test from 'node:test'
 import assert from 'node:assert/strict'
 import { gatherHostState } from '../src/restore/host.js'
 import { buildPlan, planSummary, writeTargets } from '../src/restore/plan.js'
+import { runChecks } from '../src/restore/checks.js'
 import { makeFakeHost } from './helpers/fake-host.js'
 import { sampleArtifact } from './helpers/sample-artifact.js'
 
@@ -17,17 +18,50 @@ async function planFor({ artifact = sampleArtifact(), hostOptions = {}, selectio
 
 const find = (plan, kind, ref) => plan.find(item => item.kind === kind && item.ref === ref)
 
-test('计划：目标机没有的配置条目 → 手工（未勾选），有的 → 合并', async () => {
+test('计划：值不同的配置条目默认**不写**，显式勾选才覆盖（FORMAT.md §2 / PROJECT-PLAN §7）', async () => {
   const artifact = sampleArtifact()
   const { plan } = await planFor({ artifact })
   const merge = find(plan, 'config', 'llm-pi-ai')
   assert.equal(merge.action, 'merge')
-  assert.equal(merge.selected, true)
+  // 目标机是 {providers:{}}，备份里有一整个 provider → 值不同 → 默认保留目标机。
+  assert.equal(merge.selected, false, '值不同时默认不勾选，不能静默覆盖目标机配置')
+  assert.equal(merge.level, 'warn')
+  assert.match(merge.reason, /默认保留目标机/)
   assert.ok(Array.isArray(merge.diff))
+
+  // 用户在预览里显式勾上 → 才覆盖
+  const opted = await planFor({ artifact, selection: { overrides: { 'config:llm-pi-ai': true } } })
+  assert.equal(find(opted.plan, 'config', 'llm-pi-ai').selected, true)
+
+  // 显式取消也压得住默认开启的项
+  const cancelled = await planFor({ artifact, selection: { overrides: { 'config:llm-pi-ai': false } } })
+  assert.equal(find(cancelled.plan, 'config', 'llm-pi-ai').selected, false)
 
   const manual = find(plan, 'config', 'agent-default-model')
   assert.equal(manual.action, 'manual')
   assert.equal(manual.selected, false)
+})
+
+test('计划：拦截级检查项把命中的计划项降级为手工，不能写盘', async () => {
+  const artifact = sampleArtifact({
+    plugins: [{ name: 'dsh-bad', spec: '^1.0.0', resolvedVersion: '1.0.0', source: 'registry', commit: null, bundle: true, enabled: true, description: '', installCommand: 'dsh plugin add dsh-bad@1.0.0', unportable: false }],
+  })
+  const host = await makeFakeHost({
+    records: [{ id: 'llm-pi-ai', name: '@deepseek-ai/dsh-llm-pi-ai', override: { providers: {} } }],
+    bundles: [{ name: 'dsh-bad', version: '0.9.0', enabled: true, patchIds: ['dsh-bad'], peers: {} }],
+  })
+  const state = await gatherHostState({ ctx: host.ctx, env: host.env })
+  const checks = await runChecks({ artifact, host: state, ctx: host.ctx })
+  // 造一个"peer 不兼容"的拦截结论
+  checks.blockedItems.push({ ref: 'dsh-bad', reason: '声明 ^1.0.0，当前 0.2.0-rc.2', target: { kind: 'plugin', ref: 'dsh-bad' }, level: 'block' })
+  const plan = buildPlan({ artifact, host: state, checks, selection: { overrides: { 'plugin:dsh-bad': true } } })
+
+  const entry = find(plan, 'plugin', 'dsh-bad')
+  assert.equal(entry.action, 'manual', '被拦截的项不能仍然是 install')
+  assert.equal(entry.level, 'block')
+  assert.equal(entry.selected, false, '即使界面勾了也不该写')
+  assert.match(entry.reason, /拦截级检查项/)
+  assert.ok(!writeTargets(plan).some(item => item.ref === 'dsh-bad'), '拦截项不得进入写盘目标')
 })
 
 test('计划：pnpm-workspace 必须显式确认才写入', async () => {
@@ -96,7 +130,13 @@ test('计划：skills 同名默认跳过，勾选覆盖才写；没带文件只�
 })
 
 test('计划：汇总与"真正写盘的目标"只包含勾选项', async () => {
-  const { plan } = await planFor({ selection: { ackBuildScripts: true } })
+  // 默认不勾配置条目（值不同 → 保留目标机），所以配置不进写盘目标
+  const untouched = await planFor({ selection: { ackBuildScripts: true } })
+  const untouchedTargets = writeTargets(untouched.plan)
+  assert.ok(!untouchedTargets.some(item => item.kind === 'config'), '未显式勾选的配置条目不得进写盘目标')
+  assert.ok(untouchedTargets.some(item => item.kind === 'file'))
+
+  const { plan } = await planFor({ selection: { ackBuildScripts: true, overrides: { 'config:llm-pi-ai': true } } })
   const summary = planSummary(plan)
   assert.equal(summary.total, plan.length)
   assert.ok(summary.selected >= 2)

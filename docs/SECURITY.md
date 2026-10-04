@@ -58,6 +58,8 @@ DSH_BRITTLE_BACKUP_GITHUB_TOKEN__<目标id>
 - 剥离必须**幂等**：已剥离的值再次扫描不得报错或重复剥离。
 - `apiKeyEnv` **不得**被剥离——它是名字，不是值。
 - ⚠️ **`skills\` 目录内的文件不做逐字段脱敏**（原样复制）。因此防线 ③ 是它们**唯一**的防线，必须在复制前逐文件扫描。
+  - **实现**（2026-10-03 补齐）：`writeArtifact` 给 `copyTree` 传 `shouldCopy` 闸门，逐文件在 `cp` **之前**扫描；命中即**不写这个文件**，并记进 `skillCopy.withheld` 与任务警告（点名到具体 `skill/相对路径` 与命中的模式）。同一 skill 里的其它干净文件照常导出 —— 宁可少备一个文件，也不让"产物里绝不会出现密钥"在勾了 skills 文件时失效。
+  - 二进制按 latin1 解码后扫描：字节一一对应，不会因非法 UTF-8 抛错，也不会把二进制悄悄换成 U+FFFD 让密钥特征消失。**读不出来的文件一律不导出**（没看过的文件不能进产物）。
 - **防假阳性规则（实现约定）**：`long-hex` / `long-base64` 两个模式在"哈希状指针"（`/commit`、`/dshVersion`、`/pluginVersion`、`/createdAt`、`/hostname`、`/node`、`/platform`、`/arch`、`/resolvedVersion`）上跳过；纯十六进制串也不按 base64 判定。否则每个含 git commit 的产物都会被自己拦下。
 - **剥离值不往返**：产物里的 `<REDACTED>` 是占位符，导入侧**绝不把它写回配置**，只在报告里列出被跳过的位置（见 §6）。
 
@@ -144,6 +146,8 @@ DSH_BRITTLE_BACKUP_GITHUB_TOKEN__<目标id>
 - **取消语义**：取消 = 停止剩余项 + 回滚已写入项；`pluginManager.cancelInstall(requestId)` 用于正在进行的安装，返回 `cancelled` / `too-late` / `not-running`，`too-late` 时必须说明"该项已进入应用阶段，可能无法回滚"。
 - **不写入**：`cordis.yml`、`node_modules`、`.credentials.yaml`、`.dsh-market`、`.plugin-manager`。
 - **skills 只允许写入 `<DSH_HOME>\skills\<name>\`**：只处理产物里 `scope: "user"` 的 skill；同名时由用户选择 覆盖 / 跳过 / 重命名，**绝不删除目标机已有的其他 skill**。
+  - ⚠️ `<name>` 必须是**单个安全目录名**（`checkNameSegment`：非空、不含 `/` `\` `:`、不为 `.` / `..`、无控制字符、不以 `.` 结尾、不含 Windows 保留字符）。产物校验与写入层**各挡一次**：校验层把越界名字判为 `errors`（整份产物不通过），写入层再 `assertWithin(skillsRoot, …)` 兜底。
+  - 原因：写入前有一句 `removeTree(destination)`。名字若能越出 `skillsRoot`（例如 `..`），这一句就会**递归删掉整个 `<DSH_HOME>`**（profile 配置与全部 skills 一起没），且不回滚。**删除动作不允许只依赖上游校验。**
 - 合并语义：备份里没有的条目一律不删；`absent[]` 不是删除指令。
 
 ---
@@ -208,3 +212,4 @@ DSH_BRITTLE_BACKUP_GITHUB_TOKEN__<目标id>
 | 2026-10-02 | **随阶段一调整**：出站 SSRF、远端删除、重启端点标注为阶段二；防线 ③ 由"上传前"改为"导出前"，并明确它是 `skills\` 内文件的唯一防线；入站新增"导出落点只来自用户显式选择"；新增 skills 目录写入约束；明确本期不含任何网络代码、且以不搬运参考实现代码为目标 |
 | 2026-10-02 | **第二次修订（口径收口）**：§1 第 5/6 条改为"三个可写位置 + 两处自有删除"（U34），新增第 8/9 条（取消即回滚、预览不改盘）；§2.3 补 `RedactedSecret.path` 为字符串数组；§2.4 补自身 entry 导入按同 id 冲突默认保留目标机；§4 第 5 条改为"选择器返回值白名单"并新增第 6 条（状态端点只读）与官方 `connection` 信任闸门待确认项；§6 补 `fs` 能力缺口、`node:fs` 受限例外、`cancelInstall` 语义；§7 补 `hostname` 只进 JSON；§8 新增 U37（安装类写入归属）；§9 把"账号名"列为不采集 |
 | 2026-10-02 | **第三次修订（真实环境修复）**：§4 第 3 条由"必须带 Origin"改为"**带 Origin 时必须同源，缺失时要求 JSON 的 content-type / accept**" —— 实测宿主环境里同源 POST 不带 `Origin`，原规则会把用户自己的请求 403 掉；`Origin: null` 仍然拒绝，命中放行分支时写一次 info 日志 |
+| 2026-10-03 | **第四次修订（补齐已写下但未实现的控制）**：① §6 补 `skills[].name` 的单段名校验（校验层 + 写入层 `assertWithin` 双挡）—— 名字若为 `..`，原先的 `removeTree` 会删掉整个 `<DSH_HOME>`；② §2.3 的"`skills\` 文件复制前逐文件扫描"从**承诺**变成**实现**（命中则不写该文件并点名报告）；③ §2.3 补 `*Key` 类字段名（`secretKey` / `signingKey` / `AWS_SECRET_ACCESS_KEY` 等）的脱敏口径，并说明 `public` 开头的公钥名是有意放行；④ §2.3 补 `inherited`（bundle 层继承值）与 `override` 一样走脱敏；⑤ 兜底文档中的本机绝对路径改为占位符（U20），`spec` / `installCommand` 只掩路径、保留包名 |

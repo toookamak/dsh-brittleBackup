@@ -5,7 +5,7 @@
  * 本期没有上传步骤；除了用户选定目录与插件工作目录，不写任何位置。
  *
  * 压缩（体验优化项 2）：先把产物写成目录，再打成同名 zip，**zip 成功后才删掉目录**；
- * 打包失败就保留目录并把原因记成警告 —— 宁可多留一个目录，也不静默丢数据。
+ * 打包失败就抛出 ZIP_FAILED，临时目录保留供手工取回，不会把这次记成目录交付成功。
  */
 import { basename, join } from 'node:path'
 import { collectAll, degradationNotes } from './collect/index.js'
@@ -85,9 +85,11 @@ export async function runExport({ ctx, env = process.env, targetDir = null, opti
   const artifact = buildArtifact({ options: contentOptions(collected.options), producer: collected.producer, items })
 
   const fallback = fallbackExportRoot(env)
-  const destination = targetDir === null || targetDir === '' ? fallback : targetDir
-  if (destination === fallback || destination === workDir(env) || isWithin(workDir(env), destination)) {
-    task?.addWarning?.(`没有目录选择器可用，产物写到了插件工作目录：${fallback}`)
+  const usedFallback = targetDir === null || targetDir === ''
+  const destination = usedFallback ? fallback : targetDir
+  const wroteIntoWorkDir = destination === fallback || destination === workDir(env) || isWithin(workDir(env), destination)
+  if (wroteIntoWorkDir) {
+    task?.addWarning?.(`产物写到了插件工作目录：${destination}。这里不是备份库，重装或清理可能丢掉。`)
   }
 
   task?.setPhase?.('write', '正在写入产物', 60)
@@ -95,6 +97,10 @@ export async function runExport({ ctx, env = process.env, targetDir = null, opti
   const sources = collected.options.skillFiles ? await skillSourcesFor(env, skills) : []
   const written = await writeArtifact({ targetRoot: destination, artifact, docText, options: collected.options, skillSources: sources })
   for (const skipped of written.skillCopy.skipped) task?.addWarning?.(`skill 文件跳过：${skipped.skill}/${skipped.rel}（${skipped.reason}）`)
+  // 防线③拦下的文件必须**点名告知**：用户要知道哪个文件没被备份，不能静默少一个。
+  for (const hold of written.skillCopy.withheld ?? []) {
+    task?.addWarning?.(`skill 文件未写入产物：${hold.skill}/${hold.rel}（扫描到疑似密钥：${hold.patterns.join('、')}）。产物里不会有这个文件，需要的话请自己另存一份。`)
+  }
 
   // ---- 打包（默认开）----
   const packagingWarnings = []
@@ -125,7 +131,8 @@ export async function runExport({ ctx, env = process.env, targetDir = null, opti
   }
   for (const warning of packagingWarnings) task?.addWarning?.(warning)
 
-  await saveSettings({ lastExportDir: destination }, env)
+  // 工作目录不是用户保管的备份，不能覆盖「上次成功导出的目录」。
+  if (!wroteIntoWorkDir) await saveSettings({ lastExportDir: destination }, env)
 
   const degradation = degradationNotes(collected.meta)
   const report = {
@@ -138,7 +145,11 @@ export async function runExport({ ctx, env = process.env, targetDir = null, opti
     zipBytes: packaging.zipBytes,
     files: written.written,
     bytes: Buffer.byteLength(JSON.stringify(artifact), 'utf8'),
-    warnings: [...collected.warnings, ...packagingWarnings],
+    warnings: [
+      ...collected.warnings,
+      ...packagingWarnings,
+      ...(written.skillCopy.withheld ?? []).map(hold => `skill 文件未写入产物：${hold.skill}/${hold.rel}（扫描到疑似密钥）`),
+    ],
     redactionCount: collected.items.redactions.length,
     options: collected.options,
     credentialStatus,

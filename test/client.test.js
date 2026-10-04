@@ -145,7 +145,7 @@ test('客户端半：渲染出三个面板与勾选项（浅渲染，用假 reac
   })
   const tree = moduleExports.Section()
   const text = textOf(tree)
-  for (const expected of ['dsh-BrittleBackup', '① 导出备份', '② 导入还原', '③ 任务进度', 'skills 文件（连文件一起复制）', '打包成 zip（推荐）', '使用上次路径', '打开备份路径', '开始导出', '预览（只读）', '取消当前任务', '③ 备份配置查询 / 复制', '读取备份并生成查询文本', '复制全部内容', '下载文本']) {
+  for (const expected of ['dsh-BrittleBackup', '这不是全量备份', '第一次请先导出', '① 导出备份', '② 导入还原', '③ 任务进度', 'skills 文件（连文件一起复制）', '打包成 zip（推荐）', '填入上次目录', '打开所填目录', '开始导出', '还没选落点，不能导出', '预览（只读）', '取消当前任务', '查询这份备份（可复制）', '读取备份并生成查询文本', '复制全部内容', '下载文本']) {
     assert.ok(text.includes(expected), '页面应包含：' + expected)
   }
   assert.ok(text.includes('降级提示'), '降级提示应显示')
@@ -155,6 +155,8 @@ test('客户端半：渲染出三个面板与勾选项（浅渲染，用假 reac
   const buttons = findAll(tree, node => node.type === 'button')
   const exportButton = buttons.find(node => node.children.includes('开始导出'))
   assert.ok(exportButton, '导出按钮必须存在')
+  assert.equal(exportButton.props.disabled, true, '没选落点时不能导出，避免写进插件工作目录')
+  assert.equal(text.includes('③ 备份配置查询'), false, '查询是②里的动作，不再占用③')
   const pickButton = buttons.find(node => typeof node.children[0] === 'string' && node.children[0].indexOf('选择目录') === 0)
   assert.equal(pickButton.props.disabled, true, '宿主没给 picker 时选择按钮应禁用')
   assert.ok(react.effects.length >= 1, '挂载后应主动读一次状态')
@@ -178,15 +180,15 @@ test('客户端半：没有上次导出路径时「使用上次路径」禁用�
 
   const empty = await loadClient({ stateQueue: stateQueue('') })
   const emptyButtons = findAll(empty.moduleExports.Section(), node => node.type === 'button')
-  const disabledLast = emptyButtons.find(node => node.children.includes('使用上次路径'))
+  const disabledLast = emptyButtons.find(node => node.children.includes('填入上次目录'))
   assert.equal(disabledLast.props.disabled, true, '没有历史路径时按钮必须禁用')
   assert.equal(disabledLast.props.title, '还没有成功导出过')
-  const disabledOpen = emptyButtons.find(node => node.children.includes('打开备份路径'))
+  const disabledOpen = emptyButtons.find(node => node.children.includes('打开所填目录'))
   assert.equal(disabledOpen.props.disabled, true, '既没填路径也没历史路径时不能打开')
 
   const filled = await loadClient({ stateQueue: stateQueue('F:\\backups') })
   const filledButtons = findAll(filled.moduleExports.Section(), node => node.type === 'button')
-  const enabledLast = filledButtons.find(node => node.children.includes('使用上次路径'))
+  const enabledLast = filledButtons.find(node => node.children.includes('填入上次目录'))
   assert.equal(enabledLast.props.disabled, false)
   assert.ok(enabledLast.props.title.includes('F:\\backups'))
 })
@@ -222,6 +224,9 @@ test('客户端半：任务卡渲染进度条与彩色结论（成功 / 失败 /
   assert.ok(doneText.includes('交付物：F:\\backups\\a.zip'))
   assert.ok(doneText.includes('zip 压缩包（2.0 KB）'), doneText)
   assert.ok(doneText.includes('已剥离疑似密钥 1 处'), doneText)
+  assert.ok(doneText.includes('不要外传 backup.json'), doneText)
+  assert.ok(doneText.includes('这次没勾 skills 文件'), doneText)
+  assert.ok(doneText.includes('单独发兜底文档.md'), doneText)
   assert.ok(doneText.includes('查看完整结果 JSON'), '完整 JSON 收进可展开的 details')
 
   const failed = { ...running, phase: 'failed', percent: 35, finishedAt: 'y', error: { code: 'SECRET_SCAN', message: '产物自查发现 2 处疑似密钥' } }
@@ -259,7 +264,7 @@ test('客户端半：验证结果摘要（人话）与完整表并存', async ()
     ],
   }
   const { moduleExports } = await loadClient()
-  const selection = { off: {}, overwriteSkills: [], overwritePlugins: [], ackBuildScripts: false }
+  const selection = { overrides: {}, off: {}, overwriteSkills: [], overwritePlugins: [], ackBuildScripts: false }
 
   const summary = moduleExports.summarizeInspection(inspection, selection)
   assert.equal(summary.tone, 'warn')
@@ -270,8 +275,8 @@ test('客户端半：验证结果摘要（人话）与完整表并存', async ()
   assert.ok(summary.notes.some(note => note.text.includes('需要补 2 项')))
   assert.ok(summary.notes.some(note => note.text.includes('代码执行许可')))
 
-  // 取消勾选后计数实时变化
-  const unchecked = moduleExports.summarizeInspection(inspection, { ...selection, off: { 'config:llm-pi-ai': true } })
+  // 用户取消勾选后计数实时变化（现在走三态的 `overrides` 通道）
+  const unchecked = moduleExports.summarizeInspection(inspection, { ...selection, overrides: { 'config:llm-pi-ai': false } })
   assert.equal(unchecked.counts.auto, 0)
   assert.equal(unchecked.counts.attention, 3)
 
@@ -301,7 +306,25 @@ test('客户端半：只调用已实现的路由，负载字段与路由契约�
   assert.equal(source.includes('localStorage'), false, '不在页面里持久化任何东西')
 })
 
-test('客户端半：没有可用选择器时，选择目录按钮禁用、登记路径仍可用', async () => {
+test('客户端半：失败句给出唯一的下一步', async () => {
+  const { moduleExports } = await loadClient()
+  const cases = [
+    ['NOT_LOOPBACK', '请改用 http://127.0.0.1'],
+    ['BAD_ORIGIN', '请改用 http://127.0.0.1'],
+    ['HTTP_403', '请改用 http://127.0.0.1'],
+    ['TARGET_REQUIRED', '还没选落点，不能导出'],
+    ['PICKER_NOT_ALLOWED', '确认这个目录'],
+    ['ZIP_FAILED', '这次没有交付'],
+    ['SECRET_SCAN', '去掉内联密钥后再导出'],
+  ]
+  for (const pair of cases) {
+    const text = moduleExports.describeError({ code: pair[0], message: 'raw' })
+    assert.ok(text.includes(pair[1]), pair[0] + ' → ' + text)
+    assert.equal(text.includes('登记路径'), false, '失败句不再使用内部词：登记路径')
+  }
+})
+
+test('客户端半：没有可用选择器时，选择目录按钮禁用、确认目录仍可用', async () => {
   const snapshotState = { loading: false, error: null, notice: null, status: { plugin: {}, services: {}, degradation: [], settings: { options: {} }, task: null } }
   const { moduleExports } = await loadClient({
     stateQueue: [snapshotState, { profile: true, plugins: true, models: true, skills: true, skillFiles: false, doc: true }, { export: 'F:\\some\\dir', import: '' }, null, { off: {}, overwriteSkills: [], overwritePlugins: [], ackBuildScripts: false }, false, { detail: false, loading: false, report: null, error: null }],
@@ -309,8 +332,9 @@ test('客户端半：没有可用选择器时，选择目录按钮禁用、登�
   const tree = moduleExports.Section()
   const buttons = findAll(tree, node => node.type === 'button')
   const pick = buttons.find(node => typeof node.children[0] === 'string' && node.children[0].indexOf('选择目录') === 0)
-  const register = buttons.find(node => node.children.includes('登记路径'))
+  const register = buttons.find(node => node.children.includes('确认这个目录'))
   assert.equal(pick.props.disabled, true)
+  assert.equal(pick.children[0], '选择目录不可用')
   assert.equal(register.props.disabled, false, '有输入路径时登记按钮可用')
 })
 
@@ -334,6 +358,7 @@ test('客户端半：预览结果会被渲染成"人话摘要 + 可展开的 14 
       { id: 'file:pnpm-workspace.yaml', kind: 'file', ref: 'pnpm-workspace.yaml', action: 'confirm', level: 'warn', reason: 'allowBuilds 是代码执行许可', selected: false, requiresConfirm: true, diff: [] },
       { id: 'plugin:dshmarket', kind: 'plugin', ref: 'dshmarket', action: 'install', level: 'warn', reason: '目标机未安装', selected: true, requiresConfirm: false, diff: [] },
       { id: 'credential:XIUXIAN_API_KEY', kind: 'credential', ref: 'XIUXIAN_API_KEY', action: 'report', level: 'info', reason: '状态：missing', selected: false, requiresConfirm: false, diff: [] },
+      { id: 'skill:only-list', kind: 'skill', ref: 'only-list', action: 'manual', level: 'block', reason: '只能手工', selected: false, requiresConfirm: false, diff: [] },
     ],
   }
   const { moduleExports } = await loadClient({
@@ -346,7 +371,7 @@ test('客户端半：预览结果会被渲染成"人话摘要 + 可展开的 14 
   assert.ok(text.includes('可以还原，但有 2 项需要你确认'), text)
   assert.ok(text.includes('可直接恢复 1 项'), text)
   assert.ok(text.includes('需要注意 2 项'), text)
-  assert.ok(text.includes('只能手工 0 项'), text)
+  assert.ok(text.includes('只能手工 1 项'), text)
 
   // 完整验证结果表仍然提供，但收进可展开的 details
   assert.ok(text.includes('查看验证结果表（14 项兼容性验证）'))
@@ -355,10 +380,11 @@ test('客户端半：预览结果会被渲染成"人话摘要 + 可展开的 14 
   assert.ok(checkDetails, '验证表必须有 details 容器')
   assert.equal(checkDetails.props.open, undefined, '完整验证表默认收起（要"看细节"时再展开）')
 
-  assert.ok(text.includes('要还原的内容（4 项，逐项可勾选）'))
+  assert.ok(text.includes('要还原的内容（5 项，逐项可勾选）'))
   assert.ok(text.includes('pnpm-workspace.yaml'))
   assert.ok(text.includes('来源是 zip 压缩包'))
   assert.ok(text.includes('开始导入'))
+  assert.ok(text.includes('打开这份产物里的兜底文档.md'), '只能手工的项必须指出下一步文件')
   assert.ok(text.includes('我确认要还原 pnpm-workspace.yaml 的 allowBuilds'))
 
   const checkboxIds = findAll(tree, node => node.type === 'input' && node.props.type === 'checkbox').length

@@ -40,6 +40,40 @@ test('配置查询摘要：包含必要版本、插件、模型、skills 信息�
   assert.equal(report.summary.detail, false)
 })
 
+test('配置查询详细模式：数字上限与路径字段原样保留，*Key 明文被隐藏', async () => {
+  const host = await makeFakeHost({
+    records: [{ id: 'entry-a', name: 'plugin-a', override: {} }],
+    secretsByEntry: {},
+    bundles: [{ name: '@deepseek-ai/dsh-base', version: '0.2.0-rc.2', enabled: true }],
+    packageJson: { name: 'dsh-profile', dependencies: {} },
+  })
+  const sourceDir = `${host.root}\\backup-source`
+  await ensureDir(sourceDir)
+  const SIGNING_PLAIN = 'plain-signing-value-4c7e'
+  // 直接构造产物：这里测的是 query.js 自己的字段名判定，不经过采集侧剥离。
+  const artifact = sampleArtifact({
+    entries: [{
+      id: 'entry-a',
+      name: 'plugin-a',
+      override: { maxTokens: 256000, maxOutputTokens: 8192, tokenPath: 'providers/xiuxian/token', signingKey: SIGNING_PLAIN, apiKeyEnv: 'A_KEY' },
+      inherited: {},
+      secrets: [],
+      redactions: [],
+    }],
+  })
+  const written = await writeArtifact({ targetRoot: sourceDir, artifact, options: artifact.options })
+  const report = await buildQueryReport({ sourceDir: written.dir, env: host.env, detail: true })
+  assert.equal(report.ok, true)
+  // 名字不是秘密：数字上限与 tokenPath 必须原样留着，用户靠它排障。
+  assert.match(report.text, /"maxTokens": 256000/)
+  assert.match(report.text, /"maxOutputTokens": 8192/)
+  assert.match(report.text, /"tokenPath": "providers\/xiuxian\/token"/)
+  assert.match(report.text, /"apiKeyEnv": "A_KEY"/)
+  // *Key 是密钥值，必须隐藏。
+  assert.equal(report.text.includes(SIGNING_PLAIN), false)
+  assert.match(report.text, /"signingKey": "<已隐藏>"/)
+})
+
 test('配置查询详细模式：包含脱敏后的配置结构，并明确密钥不可复制', async () => {
   const host = await makeFakeHost({
     records: [{ id: 'entry-a', name: 'plugin-a', override: { apiKey: SECRET, apiKeyEnv: 'A_KEY', nested: { enabled: true } } }],

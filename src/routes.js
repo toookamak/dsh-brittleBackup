@@ -5,7 +5,7 @@
  *   只接受 loopback 直连；拒绝一切转发头；POST 必须同源；GET 一律无副作用；
  *   导出落点 / 导入来源只能来自"选择器白名单"（一次性，用后失效）。
  */
-import { isAbsolute } from 'node:path'
+import { dirname, isAbsolute } from 'node:path'
 import { inspectImport, runImport } from './restore/import.js'
 import { runExport } from './export.js'
 import { buildQueryReport } from './query.js'
@@ -158,8 +158,11 @@ function normalizeOptions(input) {
 function normalizeSelection(input) {
   const source = input !== null && typeof input === 'object' ? input : {}
   const off = source.off !== null && typeof source.off === 'object' ? source.off : {}
+  const rawOverrides = source.overrides !== null && typeof source.overrides === 'object' ? source.overrides : {}
   const list = value => (Array.isArray(value) ? value.filter(item => typeof item === 'string') : [])
   return {
+    // `overrides` 是三态勾选通道：缺省 = 听计划默认值，显式布尔 = 用户改过。
+    overrides: Object.fromEntries(Object.entries(rawOverrides).filter(([, value]) => typeof value === 'boolean')),
     off: Object.fromEntries(Object.entries(off).filter(([, value]) => value === true)),
     overwriteSkills: list(source.overwriteSkills),
     overwritePlugins: list(source.overwritePlugins),
@@ -175,11 +178,28 @@ async function requirePath(path, { mustExist = true } = {}) {
   return resolved
 }
 
-async function requireDirectory(path, options = {}) {
-  const resolved = await requirePath(path, options)
-  if (resolved === null) return null
+/**
+ * 「打开备份路径」要把哪个目录交给文件管理器（PROJECT-PLAN 体验优化项 1）。
+ *
+ * **为什么存在**（这是配合客户端 zip 选择流程的服务端落点）：客户端的「选择 ZIP…」
+ * 会把选中的**文件**路径写进同一个输入框，而同一个输入框旁边的「打开备份路径」按钮
+ * 照旧可点、提示语也写着"打开来源目录或 zip 所在位置"。客户端半不能改，所以这里
+ * 把这条语义补上：**路径存在但不是目录时，改开它所在的目录**（dirname）。
+ *
+ * 目录的行为不变；路径为空 / 不是绝对路径 / 不存在一律拒绝，并给出对应原因。
+ * @returns {Promise<{path:string}|{error:string}>}
+ */
+async function resolveOpenableDirectory(path) {
+  if (typeof path !== 'string' || path.trim() === '') return { error: '要打开的路径不能为空' }
+  const resolved = path.trim()
+  if (!isAbsolute(resolved)) return { error: '要打开的路径必须是绝对路径，不能是相对路径' }
   const info = await stat(resolved).catch(() => null)
-  return info?.isDirectory() ? resolved : null
+  if (info === null) return { error: '要打开的路径不存在' }
+  if (info.isDirectory()) return { path: resolved }
+  const parent = dirname(resolved)
+  const parentInfo = await stat(parent).catch(() => null)
+  if (parentInfo?.isDirectory() !== true) return { error: '要打开的路径所在目录也不存在，无法打开' }
+  return { path: parent }
 }
 
 /**
@@ -290,13 +310,13 @@ export function mountRoutes({ ctx, tasks, logger, env = process.env, openDirecto
   // ---- 打开目录（体验优化项 1；只拉起系统文件管理器，不改任何文件） ----
   disposers.push(register('/open', async (request, response) => {
     const body = await readJsonBody(request)
-    const directory = await requireDirectory(body.path)
-    if (directory === null) return sendError(response, 400, 'PATH_UNSAFE', '要打开的路径必须是存在的绝对目录路径')
-    const opened = await openDirectory(directory, { logger })
+    const target = await resolveOpenableDirectory(body.path)
+    if (target.path === undefined) return sendError(response, 400, 'PATH_UNSAFE', target.error)
+    const opened = await openDirectory(target.path, { logger })
     if (opened?.ok !== true) {
       return sendError(response, 503, opened?.code ?? 'OPEN_FAILED', opened?.reason ?? '打开目录失败')
     }
-    sendJson(response, 200, { opened: true, path: opened.path ?? directory, via: opened.command ?? null })
+    sendJson(response, 200, { opened: true, path: opened.path ?? target.path, via: opened.command ?? null })
   }))
 
   // ---- 导出 ----
@@ -304,11 +324,13 @@ export function mountRoutes({ ctx, tasks, logger, env = process.env, openDirecto
     const body = await readJsonBody(request)
     const options = normalizeOptions(body.options)
     let targetDir = typeof body.targetDir === 'string' && body.targetDir !== '' ? body.targetDir : null
-    if (targetDir !== null && !allowlist.consume(targetDir)) {
+    if (targetDir === null) {
+      return sendError(response, 400, 'TARGET_REQUIRED', '还没选落点，不能导出。请选一个你自己保管的目录；插件工作目录不是备份库。')
+    }
+    if (!allowlist.consume(targetDir)) {
       return sendError(response, 403, 'PICKER_NOT_ALLOWED', '导出目录必须来自目录选择器（白名单一次性有效）')
     }
-    // targetDir 为空时由 runExport 落到插件工作目录并记警告：
-    // 落点必须是"本次用户显式选择"，所以**不**复用上一次的目录。
+    // 落点必须是本次用户显式选择，不复用上一次的目录，也不再把空落点写进插件工作目录。
     const task = tasks.begin('export')
     runExport({ ctx, env, targetDir, options, task, logger })
       .then(async report => {

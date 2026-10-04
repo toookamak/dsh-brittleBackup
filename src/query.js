@@ -3,8 +3,8 @@
  * 只输出恢复所需的名字、版本、结构和环境变量名；不输出密钥值、主机名或绝对路径。
  */
 import { locateArtifact, readArtifact } from './artifact.js'
+import { isSecretKey } from './redact.js'
 
-const SECRET_KEY = /(?:api[-_]?key|token|password|secret|credential|authorization)/i
 const ABSOLUTE_PATH = /(?:^[a-zA-Z]:[\\/]|^[/\\]{2}|^\/(?:Users|home|var|tmp|mnt)\/)/
 
 function safeText(value) {
@@ -15,8 +15,10 @@ function safeText(value) {
 
 function safeValue(value, key = '') {
   // 名字不是秘密：apiKeyEnv / tokenName 等字段用于人工重新配置，必须保留。
+  // 字段名判定复用 redact.js 的 isSecretKey（防线 ② 的同一套切词规则）：
+  // 这里再写一份子串正则会让 maxTokens / tokenPath 被误抹，又漏掉 signingKey 这类 *Key。
   const isSecretName = /(env|name|ref|id)$/i.test(key)
-  if (SECRET_KEY.test(key) && !isSecretName) return '<已隐藏>'
+  if (isSecretKey(key) && !isSecretName) return '<已隐藏>'
   if (Array.isArray(value)) return value.map(item => safeValue(item, key))
   if (value !== null && typeof value === 'object') {
     const out = {}

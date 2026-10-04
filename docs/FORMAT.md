@@ -157,6 +157,7 @@
 | `items.redactions[]` 的构成 | **条目级剥离与文件级剥离都汇总到这里**：条目级写 `kind: "entry"` + `ref` = patch 目标 id；文件级写 `kind: "file"` + `ref` = 文件相对路径。（`items.config.entries[].redactions` 是实现侧镜像，方便 UI 定位；消费者只依赖 `items.redactions[]`） |
 | `items.plugins[].installCommand` | registry 来源优先用解析到的**精确版本**（`dsh plugin add <name>@<resolvedVersion>`）；拿不到版本时用 `dsh plugin add <name>`；`github:` / `link:` / `file:` 等来源原样用 spec |
 | `items.skills[].path` | 相对产物根的**逻辑路径**（`skills/<name>`），不是导出机器上的绝对路径 |
+| `items.skills[].name` | **必须是单个安全目录名**：非空、不含 `/` `\` `:`、不为 `.` 或 `..`、无控制字符 / NUL、不以 `.` 结尾、不含 Windows 保留字符（`*` `?` `"` `<` `>` `\|`）。不满足 → 整份产物校验失败（`errors`）。导入侧会拿它拼 `join(skillsRoot, name)` 并在覆盖前 `removeTree`，越界即等于删除整个 `<DSH_HOME>`，所以这是**硬约束**而不是建议。中文 / emoji 名字合法（只卡结构，不卡字符集）。产物自带 `path` 也不能绕过：`path` 与 `skills/<name>` 不一致只记 warning，但真正参与拼路径的是 `name` |
 | `options` | 记录**实际**勾选结果，导入侧据此区分"用户没要"与"采集失败"：关掉的项在 `options` 里为 `false`，且对应内容**确实为空数组 / 缺省** |
 
 ---

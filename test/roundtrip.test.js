@@ -143,6 +143,36 @@ test('端到端：预览 zip 产物只写插件工作目录里的解压缓存', 
   assert.deepEqual(unexpected, [], '预览只允许在插件工作目录里落解压缓存')
 })
 
+test('端到端：值不同的配置条目默认**不写**（不静默覆盖目标机）', async () => {
+  const source = await makeFakeHost(hostOptions())
+  const exportRoot = join(source.root, 'backups')
+  await exportFrom(source, exportRoot)
+
+  const target = await makeFakeHost(hostOptions({ skills: {} }))
+  const before = JSON.stringify(target.store.find(item => item.entry.patchId === 'llm-pi-ai')?.override ?? null)
+  const report = await runImport({
+    ctx: target.ctx,
+    env: target.env,
+    sourceDir: exportRoot,
+    selection: { ackBuildScripts: true },
+    task: null,
+  })
+
+  assert.ok(!report.applied.some(item => item.kind === 'config'), '没显式勾选的配置条目不得被写入')
+  const after = JSON.stringify(target.store.find(item => item.entry.patchId === 'llm-pi-ai')?.override ?? null)
+  assert.equal(after, before, '目标机配置必须原样不动')
+
+  // 显式勾上才写
+  const opted = await runImport({
+    ctx: target.ctx,
+    env: target.env,
+    sourceDir: exportRoot,
+    selection: { ackBuildScripts: true, overrides: { 'config:llm-pi-ai': true } },
+    task: null,
+  })
+  assert.ok(opted.applied.some(item => item.kind === 'config' && item.ref === 'llm-pi-ai'), '显式勾选后应当写入')
+})
+
 test('端到端：导入把配置合并写回、把 skills 目录树逐字节复制', async () => {
   const source = await makeFakeHost(hostOptions())
   const exportRoot = join(source.root, 'backups')
@@ -153,7 +183,9 @@ test('端到端：导入把配置合并写回、把 skills 目录树逐字节复
     ctx: target.ctx,
     env: target.env,
     sourceDir: exportRoot,
-    selection: { ackBuildScripts: true },
+    // 配置条目必须显式勾选才覆盖（FORMAT.md §2）；这里显式勾上，
+    // 目的是验证"合并语义"本身：被剥离的密钥不写回、目标机独有键不丢。
+    selection: { ackBuildScripts: true, overrides: { 'config:llm-pi-ai': true } },
     task: null,
   })
 
@@ -210,7 +242,7 @@ test('端到端：取消导入 → 回滚，且删除本次新建的 skill 目�
   }
 
   await assert.rejects(
-    () => runImport({ ctx: target.ctx, env: target.env, sourceDir: exportRoot, selection: { ackBuildScripts: true }, task }),
+    () => runImport({ ctx: target.ctx, env: target.env, sourceDir: exportRoot, selection: { ackBuildScripts: true, overrides: { 'config:llm-pi-ai': true } }, task }),
     error => error?.code === 'CANCELED',
   )
 
@@ -264,7 +296,7 @@ test('端到端（默认压缩）：导出只留一个 zip，导入时自动解�
     ctx: target.ctx,
     env: target.env,
     sourceDir: exportRoot,
-    selection: { ackBuildScripts: true, overwriteSkills: ['skill-a'] },
+    selection: { ackBuildScripts: true, overwriteSkills: ['skill-a'], overrides: { 'config:llm-pi-ai': true } },
   })
   assert.equal(imported.source, 'zip')
   assert.ok(imported.applied.some(item => item.kind === 'config' && item.ref === 'llm-pi-ai'))
